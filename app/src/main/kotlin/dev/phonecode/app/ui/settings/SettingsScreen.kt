@@ -782,6 +782,7 @@ private fun CrashLogPage(onBack: () -> Unit) {
 private fun LicensesPage(onBack: () -> Unit) {
     val colors = MaterialTheme.colorScheme
     val entries = listOf(
+        "OpenCode - MIT License (Copyright (c) 2025 opencode)",
         "Inter - SIL Open Font License 1.1",
         "JetBrains Mono - SIL Open Font License 1.1",
         "Eclipse JGit - Eclipse Distribution License 1.0",
@@ -800,6 +801,15 @@ private fun LicensesPage(onBack: () -> Unit) {
                 }
             }
         }
+        Spacer(Modifier.height(Spacing.s))
+        Text(
+            "PhoneCode's prompt structure, tool schemas, and loop design are adapted from OpenCode. " +
+                "PhoneCode is an independent project and is not built by, endorsed by, or affiliated with " +
+                "the OpenCode team (Anomaly).",
+            style = MaterialTheme.typography.bodySmall,
+            color = colors.tertiary,
+            modifier = Modifier.padding(horizontal = Spacing.s, vertical = Spacing.xs),
+        )
     }
 }
 
