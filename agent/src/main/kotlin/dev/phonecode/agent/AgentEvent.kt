@@ -13,6 +13,10 @@ sealed interface AgentEvent {
     /** Older messages were summarized to stay within the context window. */
     data class Compacted(val messageCount: Int) : AgentEvent
 
+    /** A queued/steering message the user sent mid-turn was just folded into the conversation, so the UI
+     *  can drop it into the timeline at the right point and clear it from the pending list. */
+    data class UserMessage(val text: String) : AgentEvent
+
     /**
      * The turn failed. [messages] carries the conversation accumulated up to the failure (prior history
      * plus the user's message) when it should be preserved, so a dropped connection does not lose context;

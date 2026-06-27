@@ -9,6 +9,7 @@ import dev.phonecode.agent.AgentEnvironment
 import dev.phonecode.agent.AgentEvent
 import dev.phonecode.agent.AgentLoop
 import dev.phonecode.agent.AgentMode
+import dev.phonecode.agent.MessageSource
 import dev.phonecode.agent.PlanExitTool
 import dev.phonecode.agent.SkillInfo
 import dev.phonecode.agent.TaskTool
@@ -92,6 +93,7 @@ data class ChatUiState(
     val streaming: String = "",
     val streamingReasoning: String = "",
     val isRunning: Boolean = false,
+    val queued: List<String> = emptyList(), // messages sent while a turn runs, awaiting pickup by the agent
     val models: List<ModelOption> = builtInModels(),
     val selected: ModelOption? = builtInModels().firstOrNull(),
     val agentMode: AgentMode = AgentMode.BUILD,
@@ -204,6 +206,11 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     private var job: Job? = null
     private var pendingDecision: CompletableDeferred<Boolean>? = null
     private var pendingQuestionDecision: CompletableDeferred<List<UserAnswer>>? = null
+
+    // Messages sent while a turn is running: the agent loop drains them as steering (picked up at its next
+    // step, so it can be redirected without stopping) or as a follow-up at the end - nothing is dropped.
+    private val pendingMessages = java.util.concurrent.ConcurrentLinkedQueue<String>()
+    private val queueSource = MessageSource { generateSequence { pendingMessages.poll() }.toList() }
 
     init {
         refreshSessions()
@@ -825,7 +832,13 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
 
     fun send(input: String) {
         val text = input.trim()
-        if (text.isEmpty() || _state.value.isRunning) return
+        if (text.isEmpty()) return
+        if (_state.value.isRunning) {
+            // Queue it for the running turn instead of dropping it; the agent picks it up at its next step.
+            pendingMessages.add(text)
+            _state.update { it.copy(queued = it.queued + text) }
+            return
+        }
         val selected = _state.value.selected ?: return fail("Select a model first.")
         val preset = providerFor(selected.providerId) ?: return fail("Unknown provider: ${selected.providerId}")
         val key = keyStore.get(selected.providerId)
@@ -878,6 +891,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             val limit = limitFor(selected) // context/output token limits drive the gauge + compaction
             val loop = AgentLoop(
                 ProviderFactory.create(preset, key, http), tools, toolContext, config,
+                steering = queueSource, // messages queued mid-turn are picked up at the next step (steer)
+                followUp = queueSource, // ...or run as a follow-up turn if queued right as the turn ends
                 turnSettings = { TurnSettings(config.model, _state.value.effort, limit?.context, limit?.output) },
                 modeProvider = { _state.value.agentMode }, // live so a plan_exit approval flips PLAN→BUILD mid-run
             )
@@ -915,6 +930,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
 
     fun cancel() {
         generation++ // invalidate the in-flight turn's events immediately, then clean up here (single owner)
+        pendingMessages.clear() // stop means stop: don't let queued messages auto-run after a cancel
         // Cancel the job FIRST so an awaiting tool unwinds via CancellationException (no extra turn/side-effect);
         // completing the deferreds is then only a fallback to resume anything not yet at a cancellation point.
         job?.cancel()
@@ -923,9 +939,28 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         turnWorkspace = null
         pendingDecision?.complete(false)
         pendingQuestionDecision?.complete(emptyList())
-        commitStreaming()
-        _state.update { it.copy(isRunning = false, pendingPermission = null, pendingQuestion = null) }
+        commitStopped()
+        _state.update { it.copy(isRunning = false, pendingPermission = null, pendingQuestion = null, queued = emptyList()) }
         TurnService.stop(getApplication())
+    }
+
+    /**
+     * Flush a cancelled turn's partial reply into BOTH the visible lines and history. The turn never
+     * reached TurnComplete, so its streamed text lived only in the streaming buffer - history was left
+     * ending on a bare user message, which read as lost context next message (and which Anthropic rejects
+     * as two user turns in a row). Writing the partial assistant reply keeps the model's view = the screen.
+     */
+    private fun commitStopped() {
+        val s = _state.value
+        commitStreaming() // streaming buffer -> visible lines (unchanged behaviour)
+        if (s.streaming.isNotBlank() && history.lastOrNull()?.role == Role.USER) {
+            val parts = buildList {
+                if (s.streamingReasoning.isNotBlank()) add(MessagePart.Reasoning(s.streamingReasoning))
+                add(MessagePart.Text(s.streaming))
+            }
+            history = history + ChatMessage(Role.ASSISTANT, parts)
+            persist()
+        }
     }
 
     private fun reduce(event: AgentEvent) {
@@ -961,6 +996,12 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             // Latest turn's tokens = current context occupancy (input already includes history), not a session sum.
             is AgentEvent.Usage -> _state.update { it.copy(usageInput = event.input, usageOutput = event.output) }
             is AgentEvent.Compacted -> Unit
+            is AgentEvent.UserMessage -> {
+                // The agent just folded a queued message into the turn: flush the live reply, drop the
+                // message into the timeline in order, and clear it from the pending list.
+                commitStreaming()
+                _state.update { it.copy(lines = it.lines + ChatLine.User(event.text), queued = it.queued - event.text) }
+            }
             is AgentEvent.Error -> {
                 // A failed turn that carried its accumulated messages preserves context (and persists it) so
                 // the next message continues the conversation instead of starting cold after a connection drop.

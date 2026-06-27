@@ -26,9 +26,23 @@ import kotlinx.serialization.json.putJsonObject
 object RequestBodyBuilders {
     private val lenient = Json { ignoreUnknownKeys = true; isLenient = true }
 
-    /** Drops messages with no wire content (e.g. assistant turns with only reasoning) - both APIs reject empty content. */
-    private fun wireMessages(messages: List<ChatMessage>): List<ChatMessage> =
-        messages.filter { m -> m.parts.any { it is MessagePart.Text || it is MessagePart.ToolCall || it is MessagePart.ToolResult } }
+    /**
+     * Drops messages with no wire content (e.g. assistant turns with only reasoning - both APIs reject empty
+     * content), then coalesces consecutive same-role messages. A stopped or interrupted turn can leave two
+     * user turns in a row (the assistant never replied); Anthropic rejects that outright ("roles must
+     * alternate between user and assistant"), and it read to the user as the model losing context. Merging
+     * the parts is lossless - the model still sees every block, just in one turn.
+     */
+    private fun wireMessages(messages: List<ChatMessage>): List<ChatMessage> {
+        val nonEmpty = messages.filter { m -> m.parts.any { it is MessagePart.Text || it is MessagePart.ToolCall || it is MessagePart.ToolResult } }
+        val merged = ArrayList<ChatMessage>(nonEmpty.size)
+        for (m in nonEmpty) {
+            val last = merged.lastOrNull()
+            if (last != null && last.role == m.role) merged[merged.lastIndex] = last.copy(parts = last.parts + m.parts)
+            else merged.add(m)
+        }
+        return merged
+    }
 
     // ---- OpenAI-compatible ----
 

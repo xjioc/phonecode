@@ -25,6 +25,17 @@ class RequestBodyBuildersTest {
 
     private fun user(text: String) = ChatMessage(Role.USER, listOf(MessagePart.Text(text)))
 
+    @Test fun consecutiveSameRoleMessagesAreMerged() {
+        // A stopped turn leaves two user turns in a row; Anthropic requires strict alternation, so they must
+        // coalesce into one user turn carrying both texts (lossless), not two consecutive user messages.
+        val req = ChatRequest(model = "claude", messages = listOf(user("first"), user("second")))
+        val messages = anthropic(req)["messages"]!!.jsonArray
+        assertEquals(1, messages.size)
+        assertEquals("user", messages[0].jsonObject["role"]!!.jsonPrimitive.content)
+        val allText = messages[0].jsonObject["content"]!!.jsonArray.joinToString { it.jsonObject["text"]!!.jsonPrimitive.content }
+        assertTrue(allText.contains("first") && allText.contains("second"))
+    }
+
     @Test fun openAiSystemBecomesFirstMessageAndStreamOptionsSet() {
         val body = openAi(ChatRequest(model = "gpt", system = "You are helpful", messages = listOf(user("hi"))))
         val messages = body["messages"]!!.jsonArray
@@ -144,9 +155,14 @@ class RequestBodyBuildersTest {
                 ChatMessage(Role.USER, listOf(MessagePart.Text("more"))),
             ),
         )
-        assertEquals(2, openAi(req)["messages"]!!.jsonArray.size)
+        // The reasoning-only assistant turn carries nothing replayable, so it drops out; the two user turns
+        // it separated then coalesce (consecutive same-role) into one valid message - no "thinking" on the wire.
+        val openAiMsgs = openAi(req)["messages"]!!.jsonArray
+        assertEquals(1, openAiMsgs.size)
+        assertFalse(openAiMsgs.toString().contains("thinking"))
         val anthropicMsgs = anthropic(req)["messages"]!!.jsonArray
-        assertEquals(2, anthropicMsgs.size)
+        assertEquals(1, anthropicMsgs.size)
         assertTrue(anthropicMsgs.all { it.jsonObject["content"]!!.jsonArray.isNotEmpty() })
+        assertFalse(anthropicMsgs.toString().contains("thinking"))
     }
 }

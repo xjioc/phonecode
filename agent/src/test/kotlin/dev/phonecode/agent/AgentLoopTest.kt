@@ -257,10 +257,14 @@ class AgentLoopTest {
         val provider = ScriptedProvider(listOf(toolTurn(Triple(0, "c", "echo")), finalText))
         var delivered = false
         val steering = MessageSource { if (!delivered) { delivered = true; listOf("also check the config") } else emptyList() }
-        loop(provider, listOf(RecordingTool()), steering = steering).run(emptyList(), "do it").toList()
+        val events = loop(provider, listOf(RecordingTool()), steering = steering).run(emptyList(), "do it").toList()
         assertEquals(2, provider.requests.size)
+        // The steering message is folded in as a plain user turn (no system-reminder wrapper), so the
+        // persisted history and the on-screen timeline match exactly.
         val secondTexts = provider.requests[1].messages.flatMap { it.parts }.filterIsInstance<MessagePart.Text>().map { it.text }
-        assertTrue(secondTexts.any { it.contains("also check the config") && it.contains("<system-reminder>") })
+        assertTrue(secondTexts.any { it == "also check the config" })
+        // ...and it is surfaced as a UserMessage event so the UI can place it in the timeline.
+        assertTrue(events.filterIsInstance<AgentEvent.UserMessage>().any { it.text == "also check the config" })
     }
 
     @Test fun followUpMessageContinuesAfterIdle() = runTest {

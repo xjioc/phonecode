@@ -61,6 +61,11 @@ class AgentLoop(
             var hasMoreToolCalls = true
             inner@ while (hasMoreToolCalls || pending.isNotEmpty()) {
                 if (pending.isNotEmpty()) {
+                    // Surface each queued message so the UI can place it in the timeline; then fold it in.
+                    pending.forEach { m ->
+                        val text = m.parts.filterIsInstance<MessagePart.Text>().joinToString("\n") { it.text }
+                        if (text.isNotBlank()) emit(AgentEvent.UserMessage(text))
+                    }
                     messages += pending
                     pending = emptyList()
                     recentSignatures.clear() // new user/steering input breaks any apparent doom loop
@@ -243,10 +248,10 @@ class AgentLoop(
 
     private fun summarize(call: ToolCallAccumulator): String = "${call.name}(${call.args.toString().take(200)})"
 
-    private fun steeringMessage(text: String): ChatMessage = ChatMessage(
-        Role.USER,
-        listOf(MessagePart.Text("<system-reminder>The user sent this message mid-task: $text\nAddress it, then continue.</system-reminder>")),
-    )
+    // A queued/steering message is folded in as a plain user turn (no wrapper), so the persisted history
+    // and the on-screen timeline match exactly; the model treats it as the user's next input.
+    private fun steeringMessage(text: String): ChatMessage =
+        ChatMessage(Role.USER, listOf(MessagePart.Text(text)))
 
     private class ToolCallAccumulator(val id: String, val name: String) {
         val args = StringBuilder()

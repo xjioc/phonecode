@@ -459,6 +459,7 @@ fun ChatScreen(
                 LaunchedEffect(it) { kotlinx.coroutines.delay(3500); vm.clearNotice() }
             }
             if (state.todos.isNotEmpty()) TodoPanel(state.todos)
+            if (state.queued.isNotEmpty()) QueuedMessages(state.queued)
             Composer(
                 state = state,
                 input = input,
@@ -626,6 +627,35 @@ private fun EmptyState(onSuggestion: (String) -> Unit, modifier: Modifier = Modi
                     .border(1.dp, colors.outline, ShapePill)
                     .padding(horizontal = 16.dp, vertical = 9.dp),
             )
+        }
+    }
+}
+
+/** Messages sent while the agent is working, shown faded above the composer until it picks each one up. */
+@Composable
+private fun QueuedMessages(queued: List<String>) {
+    val colors = MaterialTheme.colorScheme
+    Column(
+        Modifier.fillMaxWidth().padding(bottom = 6.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        for (text in queued) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                Box(
+                    Modifier.widthIn(max = 280.dp)
+                        .clip(RoundedCornerShape(24.dp))
+                        .background(colors.surfaceContainerHigh.copy(alpha = 0.45f))
+                        .padding(horizontal = 15.dp, vertical = 9.dp),
+                ) {
+                    Text(
+                        text,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = colors.onBackground.copy(alpha = 0.55f),
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
         }
     }
 }
@@ -1103,23 +1133,24 @@ private fun Composer(
                         } else {
                             KeyboardOptions.Default
                         },
-                        keyboardActions = KeyboardActions(onSend = { if (input.isNotBlank() && !state.isRunning) onSend() }),
+                        keyboardActions = KeyboardActions(onSend = { if (input.isNotBlank()) onSend() }),
                         modifier = Modifier.fillMaxWidth(),
                     )
                 }
-                // Send exists only when it can act (text present or generation to stop); it pops in
-                // with a small spring and swaps send<->stop via plain crossfade - no morphing.
+                // Send exists when it can act (text present or generation to stop); it pops in with a small
+                // spring and swaps send<->stop via plain crossfade. While a turn runs, typing shows Send
+                // (which queues the message) and an empty box shows Stop - so you can queue or stop.
                 AnimatedVisibility(
                     visible = input.isNotBlank() || state.isRunning,
                     enter = scaleIn(initialScale = 0.6f, animationSpec = PhoneSprings.quickSpec()) + fadeIn(PhoneTweens.popEnter),
                     exit = scaleOut(targetScale = 0.6f, animationSpec = PhoneSprings.quickSpec()) + fadeOut(PhoneTweens.popExit),
                 ) {
                     AnimatedContent(
-                        targetState = state.isRunning,
+                        targetState = state.isRunning && input.isBlank(),
                         transitionSpec = { fadeIn(tween(150)) togetherWith fadeOut(tween(120)) },
                         label = "sendStop",
-                    ) { running ->
-                        if (running) {
+                    ) { stop ->
+                        if (stop) {
                             PcRoundButton(Icons.Filled.Stop, "Stop", filled = true, onClick = onStop)
                         } else {
                             PcRoundButton(Icons.Filled.ArrowUpward, "Send", filled = true, onClick = onSend)
