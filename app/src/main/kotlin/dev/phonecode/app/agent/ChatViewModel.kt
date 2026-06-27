@@ -656,6 +656,11 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         val url = codexAuth.buildAuthUrl()
         val verifier = codexAuth.pendingVerifier ?: return@runCatching null
         val expectedState = codexAuth.pendingState ?: return@runCatching null
+        // Hold the process up for the whole browser round-trip. The redirect comes back to a tiny server on
+        // localhost:1455, but the moment the browser opens, PhoneCode is backgrounded and Android freezes it
+        // within seconds - the listener stops answering and the redirect "can't reach localhost". The
+        // foreground service keeps the process unfrozen until the code arrives (or the 5-minute guard fires).
+        TurnService.start(getApplication())
         // State validation happens inside the listener; only a matching callback reaches this lambda.
         codexAuth.startLoopback(expectedState) { code ->
             viewModelScope.launch(Dispatchers.IO) {
@@ -665,16 +670,18 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                         codexAuth.stopLoopback()
                         _state.update { it.copy(error = "Codex sign-in failed: ${e.message}") }
                     }
+                TurnService.stop(getApplication())
             }
         }
-        // Abandonment guard: stop listening after 5 minutes if the browser flow never completed.
+        // Abandonment guard: stop listening (and release the process) after 5 minutes if the flow never completed.
         viewModelScope.launch(Dispatchers.IO) {
             kotlinx.coroutines.delay(5 * 60_000L)
-            if (!_state.value.codexConnected) codexAuth.stopLoopback()
+            if (!_state.value.codexConnected) { codexAuth.stopLoopback(); TurnService.stop(getApplication()) }
         }
         url
     }.getOrElse { e ->
         codexAuth.stopLoopback()
+        TurnService.stop(getApplication())
         _state.update { it.copy(error = "Codex sign-in failed: ${e.message}") }
         null
     }
