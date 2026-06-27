@@ -1,5 +1,6 @@
 package dev.phonecode.agent
 
+import dev.phonecode.provider.domain.ChatMessage
 import dev.phonecode.provider.domain.ChatRequest
 import dev.phonecode.provider.domain.LlmProvider
 import dev.phonecode.provider.domain.MessagePart
@@ -196,7 +197,10 @@ class AgentLoopTest {
     @Test fun providerFailureEmitsErrorAndStops() = runTest {
         val provider = ScriptedProvider(listOf(listOf(StreamEvent.Failed("boom"))))
         val events = loop(provider).run(emptyList(), "x").toList()
-        assertEquals(AgentEvent.Error("boom"), events.last())
+        val error = events.last() as AgentEvent.Error
+        assertEquals("boom", error.message)
+        // A failed turn preserves the conversation (here just the user's message) so context survives a drop.
+        assertEquals(listOf(ChatMessage(Role.USER, listOf(MessagePart.Text("x")))), error.messages)
         assertFalse(events.any { it is AgentEvent.TurnComplete })
     }
 

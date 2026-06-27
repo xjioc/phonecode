@@ -151,13 +151,15 @@ fun PhoneCodeApp() {
                     val controller = WindowCompat.getInsetsController(window, view)
                     controller.isAppearanceLightStatusBars = !dark
                     controller.isAppearanceLightNavigationBars = !dark
-                    if (android.os.Build.VERSION.SDK_INT < 35) {
-                        // Deprecated-on-35 (where edge-to-edge transparency is enforced anyway).
-                        @Suppress("DEPRECATION")
-                        window.statusBarColor = android.graphics.Color.TRANSPARENT
-                        @Suppress("DEPRECATION")
-                        window.navigationBarColor = android.graphics.Color.TRANSPARENT
-                    }
+                    // Re-assert transparent bars unconditionally. targetSdk is 34, so on Android 15 (API 35+)
+                    // setStatusBarColor is STILL honored and the system paints a backward-compat scrim behind
+                    // the bars unless we clear it - the old `SDK_INT < 35` guard disabled exactly the fix those
+                    // devices need, leaving a black band under the status bar. Becomes a harmless no-op only if
+                    // targetSdk is ever raised to 35 (where edge-to-edge transparency is enforced anyway).
+                    @Suppress("DEPRECATION")
+                    window.statusBarColor = android.graphics.Color.TRANSPARENT
+                    @Suppress("DEPRECATION")
+                    window.navigationBarColor = android.graphics.Color.TRANSPARENT
                     if (android.os.Build.VERSION.SDK_INT >= 29) {
                         window.isStatusBarContrastEnforced = false
                         window.isNavigationBarContrastEnforced = false

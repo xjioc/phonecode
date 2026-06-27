@@ -956,7 +956,15 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             is AgentEvent.Usage -> _state.update { it.copy(usageInput = event.input, usageOutput = event.output) }
             is AgentEvent.Compacted -> Unit
             is AgentEvent.Error -> {
-                commitStreaming()
+                // A failed turn that carried its accumulated messages preserves context (and persists it) so
+                // the next message continues the conversation instead of starting cold after a connection drop.
+                if (event.messages.isNotEmpty()) {
+                    history = event.messages
+                    commitStreaming()
+                    persist()
+                } else {
+                    commitStreaming()
+                }
                 _state.update { it.copy(error = humanizeError(event.message), isRunning = false) }
             }
             is AgentEvent.TurnComplete -> {
@@ -1045,12 +1053,15 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             "Android toybox /system/bin/sh (ls, cat, grep, sed, find, ps, tar, ...); " +
                 "HOME=${u.env["HOME"]}, TMPDIR=${u.env["TMPDIR"]}"
         }
-        // Tell the model when a real package manager is reachable, so it knows it CAN install Python etc.
+        // Tell the model a real package manager is reachable, and steer it to install rather than improvise.
         val linux = when {
-            u.linuxReady() -> ". A full Alpine Linux is active via proot: run `apk add python3 py3-pip nodejs ...` " +
-                "to install tools; cwd is your workspace and edits land in the same files as the file tools."
-            u.linuxAvailable -> ". A full Alpine Linux (proot) is provisioning in the background; once ready " +
-                "`apk add ...` installs Python/pip/node. Until then this is the busybox toolkit."
+            u.linuxReady() -> ". A full Alpine Linux is active via proot: install what you need with " +
+                "`apk add python3 py3-pip nodejs ...` and use it (cwd is your workspace, so installed tools " +
+                "edit the same files as the file tools). Prefer installing the real tool over improvising one " +
+                "from busybox (e.g. `python3 -m http.server`, not an `nc` loop)."
+            u.linuxAvailable -> ". A full Alpine Linux (proot) is provisioning in the background. Run any shell " +
+                "command once to trigger setup, then retry `apk add python3 py3-pip nodejs ...` to install real " +
+                "tools - do not settle for a busybox workaround when the proper tool can be installed."
             else -> ""
         }
         return AgentEnvironment(

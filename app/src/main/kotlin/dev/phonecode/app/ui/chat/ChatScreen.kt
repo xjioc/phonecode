@@ -79,6 +79,7 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Star
@@ -995,27 +996,59 @@ private fun ErrorBanner(text: String, onDismiss: () -> Unit) {
 }
 
 @Composable
-private fun TodoPanel(todos: List<TodoItem>) {
+internal fun TodoPanel(todos: List<TodoItem>) {
     val colors = MaterialTheme.colorScheme
+    // Compact + collapsible: a one-line summary by default (it floats over the transcript, so a full list
+    // was occluding the latest messages). Tap to expand the full plan, capped and scrollable.
+    var expanded by remember { mutableStateOf(false) }
+    fun glyphOf(s: TodoStatus) = when (s) {
+        TodoStatus.PENDING -> "○"; TodoStatus.IN_PROGRESS -> "◐"; TodoStatus.COMPLETED -> "●"; TodoStatus.CANCELLED -> "✕"
+    }
+    fun colorOf(s: TodoStatus) = when (s) {
+        TodoStatus.COMPLETED, TodoStatus.CANCELLED -> colors.tertiary
+        TodoStatus.IN_PROGRESS -> colors.onBackground
+        TodoStatus.PENDING -> colors.secondary
+    }
+    val done = todos.count { it.status == TodoStatus.COMPLETED }
+    val active = todos.firstOrNull { it.status == TodoStatus.IN_PROGRESS }
+        ?: todos.firstOrNull { it.status == TodoStatus.PENDING }
     Column(
-        Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 4.dp).clip(MaterialTheme.shapes.medium)
-            .background(colors.surface).padding(12.dp),
-        verticalArrangement = Arrangement.spacedBy(3.dp),
+        Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 4.dp).clip(MaterialTheme.shapes.small)
+            .background(colors.surface)
+            .animateContentSize(spring(dampingRatio = 1f, stiffness = Spring.StiffnessMediumLow)),
     ) {
-        val done = todos.count { it.status == TodoStatus.COMPLETED }
-        Text("Tasks  $done/${todos.size}", style = MaterialTheme.typography.labelSmall, color = colors.secondary, modifier = Modifier.padding(bottom = 2.dp))
-        todos.forEach { todo ->
-            val glyph = when (todo.status) {
-                TodoStatus.PENDING -> "○"; TodoStatus.IN_PROGRESS -> "◐"; TodoStatus.COMPLETED -> "●"; TodoStatus.CANCELLED -> "✕"
+        Row(
+            Modifier.fillMaxWidth().clickable { expanded = !expanded }.padding(10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text("Tasks $done/${todos.size}", style = MaterialTheme.typography.labelSmall, color = colors.secondary)
+            if (active != null) {
+                Text(glyphOf(active.status), style = MaterialTheme.typography.labelMedium.copy(fontFamily = PcMono), color = colorOf(active.status))
+                Text(
+                    active.content, style = MaterialTheme.typography.labelMedium, color = colors.onBackground,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
+                )
+            } else {
+                Spacer(Modifier.weight(1f))
             }
-            val color = when (todo.status) {
-                TodoStatus.COMPLETED, TodoStatus.CANCELLED -> colors.tertiary
-                TodoStatus.IN_PROGRESS -> colors.onBackground
-                TodoStatus.PENDING -> colors.secondary
-            }
-            Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(glyph, style = MaterialTheme.typography.labelMedium.copy(fontFamily = PcMono), color = color)
-                Text(todo.content, style = MaterialTheme.typography.labelMedium, color = color)
+            Icon(
+                if (expanded) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown, null,
+                tint = colors.tertiary, modifier = Modifier.size(18.dp),
+            )
+        }
+        if (expanded) {
+            Column(
+                Modifier.fillMaxWidth().heightIn(max = 180.dp).verticalScroll(rememberScrollState())
+                    .padding(start = 10.dp, end = 10.dp, bottom = 10.dp),
+                verticalArrangement = Arrangement.spacedBy(3.dp),
+            ) {
+                todos.forEach { todo ->
+                    Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(glyphOf(todo.status), style = MaterialTheme.typography.labelMedium.copy(fontFamily = PcMono), color = colorOf(todo.status))
+                        Text(todo.content, style = MaterialTheme.typography.labelMedium, color = colorOf(todo.status))
+                    }
+                }
             }
         }
     }
@@ -1145,8 +1178,10 @@ private fun WrenchMenu(
 ) {
     val colors = MaterialTheme.colorScheme
     // Sheet content: the M3 ModalBottomSheet supplies surface, scrim, and back handling.
+    // Critically damped (dampingRatio = 1f) so the sheet height settles flat - the emphasized spring's
+    // overshoot read as the sheet "bouncing" before landing. Matches the composer capsule's spec.
     Column(
-        modifier.fillMaxWidth().animateContentSize(PhoneSprings.emphasizedSpec()),
+        modifier.fillMaxWidth().animateContentSize(spring(dampingRatio = 1f, stiffness = Spring.StiffnessMediumLow)),
     ) {
         AnimatedContent(
             targetState = panel,

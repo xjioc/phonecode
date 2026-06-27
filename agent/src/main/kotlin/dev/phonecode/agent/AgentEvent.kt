@@ -13,7 +13,12 @@ sealed interface AgentEvent {
     /** Older messages were summarized to stay within the context window. */
     data class Compacted(val messageCount: Int) : AgentEvent
 
-    data class Error(val message: String) : AgentEvent
+    /**
+     * The turn failed. [messages] carries the conversation accumulated up to the failure (prior history
+     * plus the user's message) when it should be preserved, so a dropped connection does not lose context;
+     * empty means leave the existing history untouched.
+     */
+    data class Error(val message: String, val messages: List<ChatMessage> = emptyList()) : AgentEvent
 
     /**
      * Terminal event: the assistant turn finished with no further tool calls.

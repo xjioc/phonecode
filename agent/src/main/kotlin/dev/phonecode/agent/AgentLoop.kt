@@ -133,7 +133,10 @@ class AgentLoop(
                     }
                 }
 
-                failure?.let { emit(AgentEvent.Error(it)); return@flow }
+                // Preserve the conversation so far (prior history + the user's message) on failure, so a
+                // dropped connection does not reset context for the next message. The partial/failed assistant
+                // turn is intentionally excluded - it is only appended on the next line, after this check.
+                failure?.let { emit(AgentEvent.Error(it, messages.toList())); return@flow }
                 messages += ChatMessage(Role.ASSISTANT, assistantParts(reasoning, text, toolCalls))
 
                 if (lastStep) {

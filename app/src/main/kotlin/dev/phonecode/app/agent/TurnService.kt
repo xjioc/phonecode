@@ -9,6 +9,7 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
+import android.os.PowerManager
 import dev.phonecode.app.R
 
 /**
@@ -18,6 +19,8 @@ import dev.phonecode.app.R
  * turn ends. No work happens here - the turn lives in the ViewModel; this just holds the lease.
  */
 class TurnService : Service() {
+
+    private var wakeLock: PowerManager.WakeLock? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -43,7 +46,21 @@ class TurnService : Service() {
         } else {
             startForeground(NOTIFICATION_ID, notification)
         }
+        // The foreground service keeps the process alive but does NOT keep the CPU awake; without this
+        // partial wake lock the streaming HTTP call stalls once the screen turns off (Doze). Idempotent so
+        // repeated start deliveries don't stack; the 60-min timeout is a safety net against a missed stop.
+        if (wakeLock == null) {
+            wakeLock = getSystemService(PowerManager::class.java)
+                .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "PhoneCode:turn")
+                .apply { setReferenceCounted(false); acquire(60 * 60 * 1000L) }
+        }
         return START_NOT_STICKY
+    }
+
+    override fun onDestroy() {
+        wakeLock?.let { if (it.isHeld) it.release() }
+        wakeLock = null
+        super.onDestroy()
     }
 
     companion object {
