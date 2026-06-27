@@ -22,3 +22,9 @@ local.properties
 
 # Roborazzi design-loop screenshots (regenerated every test run)
 app/screenshots/
+
+# Not published: design process, internal docs, and local tooling config.
+# Only the app source belongs in the public repo.
+/design/
+/docs/
+/.claude/

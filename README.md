@@ -34,21 +34,6 @@ your prompts go only to the provider you pick.
   import use a file you choose through the Storage Access Framework, and Auto Backup excludes
   secrets.
 
-## Design
-
-PhoneCode uses its own design language. It is strictly monochrome: AMOLED black, pure white, and the
-shades between them. Motion follows Apple HIG physics, with research-grounded springs, instant press
-feedback, and iMessage-style message insertion. The layout is true edge-to-edge with theme-aware
-system bars.
-
-While the model is thinking, an energy layer appears. It is inspired by Neural Expressive and
-rendered purely in luminance: a soft mist, a shimmer, and flowing light that fade out once the
-response is done. Light is the only accent.
-
-Design references live in `design/` (interactive HTML prototypes) and `design/specs/`, which holds
-the researched specs for Apple motion, Neural Expressive, design tokens, OAuth flows, and the export
-format.
-
 ## Building
 
 Requirements: JDK 21 and the Android SDK (platform 34 and 36, build-tools 36). Android Studio is not
