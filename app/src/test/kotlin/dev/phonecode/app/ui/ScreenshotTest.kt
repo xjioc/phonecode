@@ -175,7 +175,7 @@ class ScreenshotTest {
         compose.onNodeWithContentDescription("Menu").performClick()
         shoot("07-drawer")
 
-        compose.onNodeWithText("Settings").performClick()
+        compose.onNodeWithContentDescription("Settings").performClick()
         shoot("08-settings-root")
         compose.onNodeWithText("Providers").performClick()
         shoot("09-settings-providers")
@@ -201,7 +201,7 @@ class ScreenshotTest {
     fun darkSettings() {
         awaitConversation()
         compose.onNodeWithContentDescription("Menu").performClick()
-        compose.onNodeWithText("Settings").performClick()
+        compose.onNodeWithContentDescription("Settings").performClick()
         shoot("13-settings-root-dark")
     }
 }

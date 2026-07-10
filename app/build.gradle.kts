@@ -4,6 +4,19 @@ plugins {
     alias(libs.plugins.compose.compiler)
 }
 
+val releaseStoreFile = providers.gradleProperty("PHONECODE_RELEASE_STORE_FILE")
+    .orElse(providers.environmentVariable("PHONECODE_RELEASE_STORE_FILE"))
+    .orNull
+val releaseStorePassword = providers.gradleProperty("PHONECODE_RELEASE_STORE_PASSWORD")
+    .orElse(providers.environmentVariable("PHONECODE_RELEASE_STORE_PASSWORD"))
+    .orNull
+val releaseKeyAlias = providers.gradleProperty("PHONECODE_RELEASE_KEY_ALIAS")
+    .orElse(providers.environmentVariable("PHONECODE_RELEASE_KEY_ALIAS"))
+    .orNull
+val releaseKeyPassword = providers.gradleProperty("PHONECODE_RELEASE_KEY_PASSWORD")
+    .orElse(providers.environmentVariable("PHONECODE_RELEASE_KEY_PASSWORD"))
+    .orNull
+
 android {
     namespace = "dev.phonecode.app"
     compileSdk = 37
@@ -12,24 +25,33 @@ android {
     defaultConfig {
         applicationId = "dev.phonecode"
         minSdk = 26
-        targetSdk = 34
-        versionCode = 20
-        versionName = "0.2.0"
+        targetSdk = 35
+        versionCode = 21
+        versionName = "0.2.1"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables { useSupportLibrary = true }
     }
 
+    signingConfigs {
+        if (listOf(releaseStoreFile, releaseStorePassword, releaseKeyAlias, releaseKeyPassword).all { it != null }) {
+            create("release") {
+                storeFile = file(releaseStoreFile!!)
+                storePassword = releaseStorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+            }
+        }
+    }
+
     buildTypes {
         release {
-            // R8 + resource shrinking: debug Compose is inherently janky - this is the smooth build.
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
             )
-            // Signed with the debug key so it installs directly during development.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.findByName("release")
         }
     }
 

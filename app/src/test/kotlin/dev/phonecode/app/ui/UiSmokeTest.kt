@@ -76,7 +76,7 @@ class UiSmokeTest {
         // Context usage breakdown opens from the glanceable ring (moved out of the tools menu).
         // Done last: this sheet has no in-content dismiss row, so we leave it open - the test only
         // proves it composes without crashing.
-        compose.onNodeWithContentDescription("Context usage").performClick()
+        compose.onNodeWithContentDescription("Context usage", substring = true).performClick()
         compose.onNodeWithText("Input").assertIsDisplayed()
     }
 
@@ -84,7 +84,7 @@ class UiSmokeTest {
     fun drawerOpensAndSettingsGearWorks() {
         dismissOnboardingIfPresent()
         compose.onNodeWithContentDescription("Menu").performClick()
-        compose.onNodeWithText("Settings").performClick()
+        compose.onNodeWithContentDescription("Settings").performClick()
         compose.onNodeWithText("Providers").assertIsDisplayed()
     }
 
@@ -92,7 +92,7 @@ class UiSmokeTest {
     fun everySettingsPageOpensWithoutCrashing() {
         dismissOnboardingIfPresent()
         compose.onNodeWithContentDescription("Menu").performClick()
-        compose.onNodeWithText("Settings").performClick()
+        compose.onNodeWithContentDescription("Settings").performClick()
         listOf(
             "General",
             "Appearance",

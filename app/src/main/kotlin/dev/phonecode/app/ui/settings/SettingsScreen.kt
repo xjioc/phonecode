@@ -38,6 +38,7 @@ import androidx.compose.material.icons.outlined.AccountTree
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Cloud
 import androidx.compose.material.icons.outlined.Extension
+import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material.icons.outlined.Person
@@ -153,12 +154,13 @@ private fun SettingsPageContent(
     navigate: (String) -> Unit,
 ) {
     when (page) {
-        "general" -> GeneralPage(vm, settingsVm) { navigate("home") }
+        "general" -> GeneralPage(settingsVm) { navigate("home") }
         "appearance" -> AppearancePage(settingsVm) { navigate("home") }
         "personal" -> PersonalPage(settingsVm) { navigate("home") }
         "providers" -> ProvidersPage(vm, onOpenProvider = { navigate("provider:$it") }) { navigate("home") }
         "mcp" -> McpPage(vm) { navigate("home") }
         "skills" -> SkillsPage(vm) { navigate("home") }
+        "files" -> FilesPage(vm, settingsVm) { navigate("home") }
         "git" -> GitPage(vm, settingsVm) { navigate("home") }
         "export" -> ExportPage(vm, settingsVm) { navigate("home") }
         "about" -> AboutPage(vm, onOpenDoc = navigate) { navigate("home") }
@@ -286,6 +288,11 @@ private fun HomePage(vm: ChatViewModel, settingsVm: SettingsViewModel, onBack: (
         // says what the section governs (per-project repos), the row keeps the familiar name.
         PcSectionLabel("Workspace")
         PcGroup {
+            NavRow(
+                "Files & permissions",
+                value = if (state.sharedFolders.isEmpty()) "Private" else "${state.sharedFolders.size} linked",
+                icon = Icons.Outlined.Folder,
+            ) { onOpen("files") }
             NavRow("Git", icon = Icons.Outlined.AccountTree) { onOpen("git") }
         }
         PcSectionLabel("Data")
@@ -300,19 +307,9 @@ private fun HomePage(vm: ChatViewModel, settingsVm: SettingsViewModel, onBack: (
 }
 
 @Composable
-private fun GeneralPage(vm: ChatViewModel, settingsVm: SettingsViewModel, onBack: () -> Unit) {
-    val state by vm.state.collectAsStateWithLifecycle()
+private fun GeneralPage(settingsVm: SettingsViewModel, onBack: () -> Unit) {
     val settings by settingsVm.settings.collectAsStateWithLifecycle()
     Page("General", onBack) {
-        PcSectionLabel("Permissions")
-        PcGroup {
-            // Reads and writes the persisted store directly - the SAME source the permission gate
-            // checks, so the toggle can never disagree with the effective behavior.
-            ToggleRow("Auto-accept permissions", "Run tools without confirming each one", checked = settings.autoAccept) { v ->
-                settingsVm.update { it.copy(autoAccept = v) }
-                vm.setAutoAccept(v) // keep the in-memory mirror coherent for state readers
-            }
-        }
         PcSectionLabel("Defaults")
         PcGroup {
             AgentMode.entries.forEach { mode ->
@@ -326,6 +323,68 @@ private fun GeneralPage(vm: ChatViewModel, settingsVm: SettingsViewModel, onBack
                 }
             }
             ToggleRow("Send on Enter", checked = settings.sendOnEnter) { v -> settingsVm.update { it.copy(sendOnEnter = v) } }
+        }
+    }
+}
+
+@Composable
+private fun FilesPage(vm: ChatViewModel, settingsVm: SettingsViewModel, onBack: () -> Unit) {
+    val state by vm.state.collectAsStateWithLifecycle()
+    val settings by settingsVm.settings.collectAsStateWithLifecycle()
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        if (uri != null) vm.linkSharedFolder(uri)
+    }
+    Page("Files & permissions", onBack) {
+        PcSectionLabel("Workspace")
+        PcGroup {
+            PcRow {
+                Icon(Icons.Outlined.Folder, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(20.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("Private project workspace", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onBackground)
+                    Text("Permanent and fully available to the agent", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                Icon(Icons.Filled.Check, null, tint = MaterialTheme.colorScheme.onBackground, modifier = Modifier.size(20.dp))
+            }
+        }
+        PcSectionLabel("Phone folders")
+        if (state.sharedFolders.isNotEmpty()) {
+            PcGroup {
+                state.sharedFolders.forEach { folder ->
+                    PcRow {
+                        Icon(Icons.Outlined.Folder, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(20.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(folder.name, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onBackground)
+                            Text(if (folder.writable) "Read & write" else "Read only", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        PcIconButton(Icons.Filled.Delete, "Remove ${folder.name}") { vm.unlinkSharedFolder(folder.id) }
+                    }
+                }
+            }
+            Spacer(Modifier.height(10.dp))
+        }
+        PcButton("Link a folder", filled = false) { picker.launch(null) }
+        Note("The system picker grants access only to the folder you choose. Linked access survives app restarts and can be removed here or in system settings.")
+        PcSectionLabel("Agent changes")
+        PcGroup {
+            CheckRow("Ask before changes", selected = !settings.autoAccept) {
+                settingsVm.update { it.copy(autoAccept = false) }
+                vm.setAutoAccept(false)
+            }
+            CheckRow("Allow changes automatically", selected = settings.autoAccept) {
+                settingsVm.update { it.copy(autoAccept = true) }
+                vm.setAutoAccept(true)
+            }
+        }
+        Note("Reading the active workspace and linked folders is always allowed. This setting controls writes, terminal commands, Git operations, and other actions that can change data.")
+        state.notice?.let {
+            Spacer(Modifier.height(10.dp))
+            Note(it)
+            LaunchedEffect(it) { delay(3000); vm.clearNotice() }
+        }
+        state.error?.let {
+            Spacer(Modifier.height(10.dp))
+            Note(it)
+            LaunchedEffect(it) { delay(5000); vm.clearError() }
         }
     }
 }
@@ -407,10 +466,9 @@ private fun ProvidersPage(vm: ChatViewModel, onOpenProvider: (String) -> Unit, o
             Spacer(Modifier.height(6.dp))
         }
         PcSectionLabel("Providers")
-        if (vm.keysStoredInPlaintext()) {
+        if (vm.secureStorageUnavailable()) {
             Text(
-                "This device's secure keystore is unavailable, so API keys are stored unencrypted. Re-enter " +
-                    "your keys; avoid storing sensitive keys on this device.",
+                "Secure storage is unavailable on this device. PhoneCode will not save API keys or sign-in credentials.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = colors.error,
                 modifier = Modifier.padding(horizontal = Spacing.m, vertical = Spacing.xs),
@@ -660,7 +718,9 @@ private fun ExportPage(vm: ChatViewModel, settingsVm: SettingsViewModel, onBack:
     }
     Page("Export & import", onBack) {
         PcSectionLabel("Your data")
-        PcButton("Export all projects & chats", filled = false) { exporter.launch("phonecode-backup-$stamp.zip") }
+        Note("Exports contain chats and settings, are not encrypted, and never include credentials.")
+        Spacer(Modifier.height(10.dp))
+        PcButton("Export chats & settings", filled = false) { exporter.launch("phonecode-backup-$stamp.zip") }
         Spacer(Modifier.height(10.dp))
         PcButton("Import from a file", filled = false) { importer.launch(arrayOf("application/zip", "application/octet-stream")) }
         state.notice?.let {
@@ -680,9 +740,7 @@ private fun AboutPage(vm: ChatViewModel, onOpenDoc: (String) -> Unit, onBack: ()
     }
     Page("About", onBack) {
         Column(Modifier.fillMaxWidth().padding(vertical = Spacing.xl), horizontalAlignment = Alignment.CenterHorizontally) {
-            Box(Modifier.size(72.dp).clip(MaterialTheme.shapes.extraLarge).background(colors.onBackground), contentAlignment = Alignment.Center) {
-                Icon(painterResource(R.drawable.ic_launcher_foreground), null, tint = colors.background, modifier = Modifier.size(58.dp))
-            }
+            Icon(painterResource(R.drawable.ic_phonecode_mark), null, tint = colors.onBackground, modifier = Modifier.size(64.dp))
             Spacer(Modifier.height(14.dp))
             Text("PhoneCode", style = MaterialTheme.typography.headlineMedium, color = colors.onBackground)
             Text("version $version", style = MaterialTheme.typography.labelMedium, color = colors.tertiary, modifier = Modifier.padding(top = 4.dp))

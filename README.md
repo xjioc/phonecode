@@ -8,7 +8,8 @@
 
 <p align="center">
   <a href="https://dttdrv.xyz/phonecode">Website</a> ·
-  <a href="https://github.com/dttdrv/phonecode/releases/latest">Latest release</a>
+  <a href="https://github.com/dttdrv/phonecode/releases/latest">Latest release</a> ·
+  <a href="https://ko-fi.com/dttdrv">Support on Ko-fi</a>
 </p>
 
 <p align="center">
@@ -54,8 +55,8 @@ build of OpenCode.
   edit, glob, grep, ls, apply_patch, todo lists, plan and build modes, user questions, subagents
   (task tool), webfetch with free web search, MCP servers (Streamable HTTP and SSE), and
   progressive-disclosure skills (SKILL.md).
-- **Providers**: OpenCode Zen and Go, Anthropic, OpenAI, OpenRouter, Google, xAI, Groq, DeepSeek,
-  Mistral, and Together, with the catalog sourced from models.dev. You can enable or disable
+- **Providers**: OpenCode Zen and Go, Anthropic, OpenAI, OpenRouter, Google, xAI, DeepSeek,
+  Mistral, and custom endpoints, with the catalog sourced from models.dev. You can enable or disable
   providers, hide models, and mark favourites. The agent can add providers and models itself by
   editing `providers.json`, which is hot-reloaded.
 - **Sign-in flows**: GitHub uses the OAuth device flow (you type a code, with no tokens to paste)
@@ -64,10 +65,12 @@ build of OpenCode.
 - **Projects and chats**: chats are organized into projects. Each project is its own workspace
   folder and git repository, with snapshots (commits), branch switching, and push and pull from the
   chat's git button.
+- **Phone files**: link only the Android folders you choose, then keep reads and writes approval-gated
+  or allow them automatically per your workspace settings.
 - **Streaming chat** with reasoning traces, a tool-activity timeline, monochrome syntax
   highlighting, a context-window gauge, and per-model token limits that drive compaction.
-- **Privacy by construction**: keys are encrypted on-device, export and import use a file you
-  choose through the Storage Access Framework, and Auto Backup excludes secrets.
+- **Privacy by construction**: keys are encrypted on-device, Android cloud backup is disabled, and
+  manual chat/settings exports use a file you choose through the Storage Access Framework.
 
 ## Building
 
@@ -77,6 +80,7 @@ needed.
 ```powershell
 $env:JAVA_HOME = "<path to JDK 21>"
 .\gradlew.bat :app:assembleRelease   # minified release build -> app/build/outputs/apk/release/
+.\gradlew.bat :app:bundleRelease     # Play bundle -> app/build/outputs/bundle/release/
 .\gradlew.bat :app:assembleDebug     # debuggable build
 .\gradlew.bat test                   # all module unit tests (incl. Robolectric UI smoke tests)
 ```
@@ -86,6 +90,11 @@ prompts, and compaction. `:provider` holds the wire formats and catalog. `:tools
 git, web, todo, MCP, and skills tooling. The three library modules are pure JVM and fully
 unit-tested.
 
+Production bundles are unsigned unless `PHONECODE_RELEASE_STORE_FILE`,
+`PHONECODE_RELEASE_STORE_PASSWORD`, `PHONECODE_RELEASE_KEY_ALIAS`, and
+`PHONECODE_RELEASE_KEY_PASSWORD` are supplied as Gradle properties or environment variables. Use a
+dedicated upload key with Play App Signing and keep it outside the repository.
+
 ## Notes
 
 - The GitHub sign-in ships with the gh CLI's public client id for personal builds. Register your own
@@ -94,6 +103,10 @@ unit-tested.
   tokens encrypted, and talks to ChatGPT's Responses API backend. It needs a paid ChatGPT plan.
 - The Terms of Service and Privacy Policy live in `legal/` and are also shown in-app under
   Settings > About.
+- The public Play policy URLs are `https://dttdrv.xyz/phonecode-privacy` and
+  `https://dttdrv.xyz/phonecode-terms` after the website repository is deployed.
+- The optional remote execution direction is documented in [`MOBILE_BACKEND.md`](MOBILE_BACKEND.md).
+  The current release remains on-device.
 
 ## Licenses
 

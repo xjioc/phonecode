@@ -203,6 +203,17 @@ import java.util.Locale
 
 private val STAMP = SimpleDateFormat("HH:mm · d MMM", Locale.getDefault())
 
+@Composable
+private fun contextUsageColor(fraction: Float): Color {
+    val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
+    return when {
+        fraction < 0.6f -> if (dark) Color(0xFF30D158) else Color(0xFF248A3D)
+        fraction < 0.8f -> if (dark) Color(0xFFFFD60A) else Color(0xFFA66F00)
+        fraction < 0.9f -> if (dark) Color(0xFFFF9F0A) else Color(0xFFC2410C)
+        else -> MaterialTheme.colorScheme.error
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChatScreen(
@@ -469,10 +480,10 @@ fun ChatScreen(
             Box(
                 Modifier.size(40.dp).clip(ShapePill).background(colors.surfaceContainerHigh)
                     .clickable { toolsOpen = false; modelOpen = false; contextOpen = true }
-                    .semantics { contentDescription = "Context usage" },
+                    .semantics { contentDescription = "Context usage ${(ctxFrac.coerceIn(0f, 1f) * 100).toInt()} percent" },
                 contentAlignment = Alignment.Center,
             ) {
-                ContextRing(fraction = ctxFrac, modifier = Modifier.size(22.dp), stroke = 2.5f)
+                ContextRing(fraction = ctxFrac, modifier = Modifier.size(22.dp), stroke = 2.5f, color = contextUsageColor(ctxFrac))
                 MorphingMenu(
                     expanded = contextOpen,
                     onDismiss = { contextOpen = false },
@@ -634,12 +645,7 @@ private fun EmptyState(onSuggestion: (String) -> Unit, modifier: Modifier = Modi
     // Grok-style home: crisp mark + wordmark + starter chips. The chat stays quiet at rest -
     // no halos, no gradients; the ethereal layer belongs to generation only (grok-design.md).
     Column(modifier.padding(Spacing.xl), horizontalAlignment = Alignment.CenterHorizontally) {
-        Box(
-            Modifier.size(56.dp).clip(ShapePill).background(colors.surfaceContainer),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(painter = painterResource(R.drawable.ic_launcher_foreground), contentDescription = null, tint = colors.onBackground, modifier = Modifier.size(44.dp))
-        }
+        Icon(painter = painterResource(R.drawable.ic_phonecode_mark), contentDescription = null, tint = colors.onBackground, modifier = Modifier.size(48.dp))
         Spacer(Modifier.height(14.dp))
         Text("What should we build?", style = MaterialTheme.typography.titleLarge, color = colors.onBackground)
         Spacer(Modifier.height(20.dp))
@@ -1625,7 +1631,7 @@ private fun ContextPopover(state: ChatUiState) {
     val frac = limit?.let { if (it > 0) used.toFloat() / it else 0f } ?: 0f
     PopoverCard {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(13.dp), modifier = Modifier.padding(bottom = 10.dp)) {
-            ContextRing(fraction = frac, modifier = Modifier.size(52.dp), stroke = 3f)
+            ContextRing(fraction = frac, modifier = Modifier.size(52.dp), stroke = 3f, color = contextUsageColor(frac))
             Column {
                 Text(if (limit != null) "${(frac * 100).toInt()}%" else fmt(used), style = MaterialTheme.typography.headlineSmall, color = colors.onBackground)
                 Text(

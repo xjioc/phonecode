@@ -40,6 +40,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
@@ -108,7 +109,6 @@ import java.util.Locale
 private val WHEN = SimpleDateFormat("d MMM", Locale.getDefault())
 private enum class DrawerValue { CLOSED, OPEN }
 
-/** Unwrap ContextWrappers (themes, Compose test hosts) to the owning Activity, if any. */
 private tailrec fun android.content.Context.findActivity(): android.app.Activity? = when (this) {
     is android.app.Activity -> this
     is android.content.ContextWrapper -> baseContext.findActivity()
@@ -529,20 +529,15 @@ private fun Sidebar(
             }
         }
 
-        // Drawer footer, set off by a hairline. A single quiet gear leads the label - the monogram
-        // chip is gone (device feedback: minimal, no decorative marks).
         val settingsInteraction = remember { MutableInteractionSource() }
-        Box(Modifier.fillMaxWidth().height(1.dp).background(colors.outlineVariant))
-        Row(
-            Modifier.padding(horizontal = 10.dp, vertical = 6.dp).fillMaxWidth()
-                .clip(MaterialTheme.shapes.small).pressFeedback(settingsInteraction, pressedScale = 0.98f)
-                .clickable(interactionSource = settingsInteraction, indication = ripple(), onClick = onOpenSettings)
-                .heightIn(min = 52.dp).padding(start = 16.dp, end = 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(14.dp),
+        Box(
+            Modifier.padding(start = 14.dp, top = 8.dp, bottom = 10.dp).size(48.dp)
+                .clip(CircleShape).background(colors.surfaceContainerHigh)
+                .pressFeedback(settingsInteraction, pressedScale = 0.92f)
+                .clickable(interactionSource = settingsInteraction, indication = ripple(), onClick = onOpenSettings),
+            contentAlignment = Alignment.Center,
         ) {
-            Icon(Icons.Outlined.Settings, null, tint = colors.onSurfaceVariant, modifier = Modifier.size(20.dp))
-            Text("Settings", style = MaterialTheme.typography.bodyLarge, color = colors.onBackground, modifier = Modifier.weight(1f))
+            Icon(Icons.Outlined.Settings, "Settings", tint = colors.onBackground, modifier = Modifier.size(21.dp))
         }
     }
 

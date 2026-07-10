@@ -28,6 +28,8 @@ import dev.phonecode.app.data.ProjectStore
 import dev.phonecode.app.data.SecureKeyStore
 import dev.phonecode.app.data.SessionMeta
 import dev.phonecode.app.data.SessionStore
+import dev.phonecode.app.data.SharedFolder
+import dev.phonecode.app.data.SharedFolderStore
 import dev.phonecode.app.data.TransferBundle
 import dev.phonecode.app.data.toDomain
 import dev.phonecode.app.data.toPreset
@@ -56,6 +58,8 @@ import dev.phonecode.tools.mcp.McpServerConfig
 import dev.phonecode.tools.mcp.connectMcpServers
 import dev.phonecode.tools.skills.SkillManifest
 import dev.phonecode.tools.skills.SkillTool
+import dev.phonecode.tools.shared.SharedReadTool
+import dev.phonecode.tools.shared.SharedWriteTool
 import dev.phonecode.tools.todo.TodoItem
 import dev.phonecode.tools.todo.TodoStore
 import dev.phonecode.tools.todo.todoTools
@@ -112,6 +116,7 @@ data class ChatUiState(
     // append-only-safe).
     val timelineEpoch: Int = 0,
     val projects: List<Project> = emptyList(),
+    val sharedFolders: List<SharedFolder> = emptyList(),
     val favourites: Set<String> = emptySet(),
     val hiddenModels: Set<String> = emptySet(),
     val disabledProviders: Set<String> = emptySet(),
@@ -159,8 +164,11 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     private val configDir = File(app.filesDir, "config")
     private val repo = McpSkillRepository(configDir)
     private val customProviders = CustomProviderRepository(configDir)
+    private val sharedFolderStore = SharedFolderStore(File(app.filesDir, "shared_folders.json"))
+    private val sharedFileAccess = AndroidSharedFileAccess(app, sharedFolderStore)
     private val baseTools: List<Tool> =
         defaultFileTools() + ApplyPatchTool() + ExternalDirectoryTool() + QuestionTool() +
+            SharedReadTool(sharedFileAccess) + SharedWriteTool(sharedFileAccess) +
             PlanExitTool { setAgentMode(AgentMode.BUILD) } + todoTools(todoStore) +
             WebFetchTool(http) + WebSearchTool(http) + TaskTool(::runSubagent) + gitTools { gitCredentials() } +
             // Real terminal access: busybox userland over Android's toybox, transparently upgrading to a
@@ -238,6 +246,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                     codexConnected = keyStore.get("codex.access") != null,
                     githubLogin = keyStore.get("github.login"),
                     currentSessionId = sessionId,
+                    sharedFolders = sharedFolderStore.list(),
                 )
             }
         }
@@ -485,6 +494,21 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch(Dispatchers.IO) { appSettings.update { it.copy(autoAccept = value) } }
     }
 
+    fun linkSharedFolder(uri: android.net.Uri) {
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching { sharedFileAccess.link(uri) }
+                .onSuccess { folders -> _state.update { it.copy(sharedFolders = folders, notice = "Folder linked") } }
+                .onFailure { error -> _state.update { it.copy(error = "Could not link folder: ${error.message}") } }
+        }
+    }
+
+    fun unlinkSharedFolder(id: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val folders = sharedFileAccess.unlink(id)
+            _state.update { it.copy(sharedFolders = folders, notice = "Folder access removed") }
+        }
+    }
+
     /**
      * Start a fresh conversation (a new session id); persisted history of the old one is kept on
      * disk. Works mid-stream: the running turn is cancelled first (its partial reply was already
@@ -672,7 +696,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     fun keyFor(providerId: String): String = keyStore.get(providerId).orEmpty()
     fun setKey(providerId: String, key: String) = keyStore.put(providerId, key.trim())
     /** True when the device Keystore was unavailable and keys are stored UNENCRYPTED (warn on the providers screen). */
-    fun keysStoredInPlaintext(): Boolean = keyStore.usingPlaintextFallback
+    fun secureStorageUnavailable(): Boolean = keyStore.secureStorageUnavailable
     fun clearError() = _state.update { it.copy(error = null) }
 
     /** UI-originated user-visible failures (e.g. unreadable attachment) share the error banner. */

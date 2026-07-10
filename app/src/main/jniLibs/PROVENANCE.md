@@ -11,20 +11,21 @@ from the pinned commit and compare the SHA-256.
   (`mmap PROT_EXEC` survives where `execve` is denied), so `apk add python3 ...` works.
 - **Source:** https://github.com/green-green-avk/build-proot-android (the PRoot build behind the
   AnotherTerm terminal app's "Linux under PRoot" feature).
-- **Pinned commit:** `01f83b8841358450c78333d1b33ab30d4943bec4` (2023-06-23), `packages/proot-android-aarch64.tar.gz`.
+- **Pinned build commit:** `01f83b8841358450c78333d1b33ab30d4943bec4` (2023-06-23), using PRoot `0.15_release` and talloc `2.4.3`.
+- **Build toolchain:** Android NDK `28.2.13676358`, with 16 KB ELF page alignment for Android 15+ compatibility.
 - **Files + SHA-256 (verified at vendor time):**
-  - `root/bin/proot` -> `arm64-v8a/libproot.so` -> `297abc237247682a84a3fd4283b28f69506502b4b852faf71fd726fb5d955d60`
-  - `root/libexec/proot/loader` -> `arm64-v8a/libproot-loader.so` -> `de0ace1adc76ab0555b3dbbfbff0e78c1ac14017b255262707867aea70c49437`
+  - `root/bin/proot` -> `arm64-v8a/libproot.so` -> `42a0313a04296d913279c55eccabf9082d31d0f8caf1960079d92342c4629e0c`
+  - `root/libexec/proot/loader` -> `arm64-v8a/libproot-loader.so` -> `12d2b63e897fd91a334fce23edea5d2419cae4d5fd2a369f05d03ab75682add0`
 - **Licenses:** PRoot (GPL-2.0), talloc (LGPL-3.0) - see the source repo.
 - **Scope:** arm64-v8a only. Other ABIs intentionally have no proot and fall back to busybox at runtime
   (`EnvironmentBootstrap.buildLinux` returns null), keeping the unaudited-binary surface minimal.
-- **Residual risk:** this is a prebuilt binary, not built from source here, so its bytes are trusted on
-  the pin + hash, not independently audited. To harden a release, rebuild from the source repo's scripts.
+- **Residual risk:** the binaries are built from pinned upstream source outside this repository and
+  committed by hash. Rebuild and compare them when upgrading the NDK, PRoot, or talloc.
 
-To re-verify:
+To verify the committed files:
 
-    curl -fsSL https://raw.githubusercontent.com/green-green-avk/build-proot-android/01f83b8841358450c78333d1b33ab30d4943bec4/packages/proot-android-aarch64.tar.gz | tar -xz
-    shasum -a 256 root/bin/proot root/libexec/proot/loader
+    shasum -a 256 arm64-v8a/libproot.so arm64-v8a/libproot-loader.so
+    llvm-readelf -lW arm64-v8a/libproot.so arm64-v8a/libproot-loader.so
 
 ## busybox - arm64-v8a
 

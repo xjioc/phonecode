@@ -44,9 +44,8 @@ fun phoneHaze(): HazeStyle {
  */
 @Composable
 fun phoneHazeBand(): HazeStyle {
-    val colors = MaterialTheme.colorScheme
     return HazeStyle(
-        backgroundColor = colors.background,
+        backgroundColor = Color.Transparent,
         tints = emptyList(),
         blurRadius = 4.dp,
         noiseFactor = 0f,
