@@ -117,11 +117,11 @@ object BuiltInPresets {
      */
     val codex = ProviderPreset(
         id = "codex",
-        displayName = "ChatGPT (Codex)",
+        displayName = "ChatGPT",
         baseUrl = "https://chatgpt.com/backend-api/codex",
         wireFormat = WireFormat.OPENAI_RESPONSES,
         authScheme = AuthScheme.BEARER,
-        extraHeaders = mapOf("OpenAI-Beta" to "responses=experimental", "originator" to "codex_cli_rs"),
+        extraHeaders = mapOf("originator" to "opencode"),
     )
 
     // Together + Groq removed per user direction (round-3 feedback); OpenCode Go added.

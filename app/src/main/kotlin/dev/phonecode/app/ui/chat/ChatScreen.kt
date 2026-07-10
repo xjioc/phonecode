@@ -105,7 +105,6 @@ import androidx.compose.material.icons.outlined.Language
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Terminal
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
@@ -150,7 +149,6 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -166,6 +164,7 @@ import dev.phonecode.app.agent.ToolStatus
 import dev.phonecode.app.ui.components.ContextRing
 import dev.phonecode.app.ui.components.PcDivider
 import dev.phonecode.app.ui.components.PcIconButton
+import dev.phonecode.app.ui.components.MorphingMenu
 import dev.phonecode.app.ui.components.PcRoundButton
 import dev.phonecode.app.ui.components.elasticOverscroll
 import dev.phonecode.app.ui.components.pressFeedback
@@ -474,13 +473,12 @@ fun ChatScreen(
                 contentAlignment = Alignment.Center,
             ) {
                 ContextRing(fraction = ctxFrac, modifier = Modifier.size(22.dp), stroke = 2.5f)
-                DropdownMenu(
+                MorphingMenu(
                     expanded = contextOpen,
-                    onDismissRequest = { contextOpen = false },
-                    offset = DpOffset(0.dp, 8.dp),
+                    onDismiss = { contextOpen = false },
+                    above = false,
+                    alignEnd = true,
                     modifier = Modifier.width(280.dp),
-                    shape = MaterialTheme.shapes.extraLarge,
-                    containerColor = colors.surfaceContainerHigh,
                 ) {
                     ContextPopover(state)
                 }
@@ -1242,14 +1240,11 @@ private fun Composer(
                 // ChatGPT-style: a bare + opens tools/attach; the capsule itself is the only container.
                 Box {
                     PcIconButton(Icons.Filled.Add, "Tools", tint = colors.secondary, onClick = onMenuToggle)
-                    DropdownMenu(
+                    MorphingMenu(
                         expanded = menuExpanded,
-                        onDismissRequest = onMenuDismiss,
-                        offset = DpOffset(0.dp, (-8).dp),
-                        shape = MaterialTheme.shapes.extraLarge,
-                        containerColor = colors.surfaceContainerHigh,
-                        tonalElevation = 6.dp,
-                        shadowElevation = 12.dp,
+                        onDismiss = onMenuDismiss,
+                        above = true,
+                        modifier = Modifier.width(320.dp),
                         content = menuContent,
                     )
                 }

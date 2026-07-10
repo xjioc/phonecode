@@ -75,8 +75,8 @@ fun OnboardingScreen(
         AnimatedContent(
             targetState = step,
             transitionSpec = {
-                (slideInHorizontally(PhoneSprings.standardSpec()) { it / 3 } + fadeIn(PhoneTweens.popEnter)) togetherWith
-                    (slideOutHorizontally(PhoneSprings.standardSpec()) { -it / 4 } + fadeOut(PhoneTweens.popExit))
+                (slideInHorizontally(tween(260, easing = PhoneEasings.iOSStandard)) { it / 3 } + fadeIn(tween(220))) togetherWith
+                    (slideOutHorizontally(tween(220, easing = PhoneEasings.iOSStandard)) { -it / 4 } + fadeOut(tween(160)))
             },
             label = "onboarding",
         ) { s ->
@@ -96,11 +96,11 @@ fun OnboardingScreen(
 @Composable
 private fun Modifier.entrance(delayMs: Int): Modifier {
     val alpha = remember { Animatable(0f) }
-    val rise = remember { Animatable(18f) }
+    val rise = remember { Animatable(10f) }
     LaunchedEffect(Unit) {
         delay(delayMs.toLong())
-        launch { alpha.animateTo(1f, tween(380, easing = PhoneEasings.emphasizedDecelerate)) }
-        rise.animateTo(0f, spring(dampingRatio = 0.8f, stiffness = Spring.StiffnessLow))
+        launch { alpha.animateTo(1f, tween(240, easing = PhoneEasings.emphasizedDecelerate)) }
+        rise.animateTo(0f, spring(dampingRatio = 1f, stiffness = Spring.StiffnessMediumLow))
     }
     return graphicsLayer {
         this.alpha = alpha.value
@@ -111,27 +111,17 @@ private fun Modifier.entrance(delayMs: Int): Modifier {
 @Composable
 private fun Welcome(onNext: () -> Unit) {
     val colors = MaterialTheme.colorScheme
-    val markScale = remember { Animatable(0.94f) }
-    LaunchedEffect(Unit) { markScale.animateTo(1f, spring(dampingRatio = 1f, stiffness = Spring.StiffnessMediumLow)) }
     Column(
         Modifier.fillMaxSize().padding(horizontal = 32.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Spacer(Modifier.weight(1f))
-        Box(
-            Modifier.size(96.dp)
-                .entrance(0)
-                .graphicsLayer { scaleX = markScale.value; scaleY = markScale.value }
-                .background(colors.onBackground, MaterialTheme.shapes.extraLarge),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(
-                painter = painterResource(R.drawable.ic_launcher_foreground),
-                contentDescription = null,
-                tint = colors.background,
-                modifier = Modifier.size(76.dp),
-            )
-        }
+        Icon(
+            painter = painterResource(R.drawable.ic_phonecode_mark),
+            contentDescription = null,
+            tint = colors.onBackground,
+            modifier = Modifier.size(58.dp).entrance(0),
+        )
         Spacer(Modifier.height(28.dp))
         Text(
             "PhoneCode",

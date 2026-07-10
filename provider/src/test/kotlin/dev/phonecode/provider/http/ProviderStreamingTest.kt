@@ -56,4 +56,22 @@ class ProviderStreamingTest {
         assertEquals(StreamEvent.Done(StopReason.END_TURN), events.last())
         server.shutdown()
     }
+
+    @Test fun codexUsesCurrentLoginHeadersAndSession() = runBlocking {
+        val server = MockWebServer()
+        server.enqueue(MockResponse().setHeader("Content-Type", "text/event-stream").setBody("data: [DONE]\n\n"))
+        server.start()
+        val preset = ProviderPreset(
+            "codex", "ChatGPT", server.url("/").toString().trimEnd('/'),
+            WireFormat.OPENAI_RESPONSES, AuthScheme.BEARER,
+            extraHeaders = mapOf("originator" to "opencode"),
+        )
+        CodexProvider(preset, "token", OkHttpClient()).stream(userReq().copy(sessionId = "session-7")).toList()
+        val request = server.takeRequest()
+        assertEquals("/responses", request.path)
+        assertEquals("session-7", request.getHeader("session-id"))
+        assertEquals("opencode", request.getHeader("originator"))
+        assertEquals(null, request.getHeader("OpenAI-Beta"))
+        server.shutdown()
+    }
 }

@@ -14,7 +14,10 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.gestures.AnchoredDraggableState
+import androidx.compose.foundation.gestures.AnchoredDraggableDefaults
 import androidx.compose.foundation.gestures.DraggableAnchors
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.anchoredDraggable
 import androidx.compose.foundation.gestures.animateTo
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -52,7 +55,6 @@ import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -90,6 +92,7 @@ import dev.phonecode.app.ui.chat.ChatScreen
 import dev.phonecode.app.ui.onboarding.OnboardingScreen
 import dev.phonecode.app.ui.components.PcButton
 import dev.phonecode.app.ui.components.PcField
+import dev.phonecode.app.ui.components.MorphingMenu
 import dev.phonecode.app.ui.components.elasticOverscroll
 import dev.phonecode.app.ui.components.pressFeedback
 import androidx.compose.material3.ripple
@@ -183,6 +186,11 @@ fun PhoneCodeApp() {
             }
         }
         SideEffect { drawerState.updateAnchors(drawerAnchors) }
+        val drawerFling = AnchoredDraggableDefaults.flingBehavior(
+            state = drawerState,
+            positionalThreshold = { it * 0.35f },
+            animationSpec = PhoneSprings.drawer,
+        )
         val drawerOffset = drawerState.offset.takeUnless(Float::isNaN) ?: 0f
         val progress = (drawerOffset / drawerWidthPx).coerceIn(0f, 1f)
         val drawerVisible = progress > 0.001f || drawerState.targetValue == DrawerValue.OPEN
@@ -200,36 +208,17 @@ fun PhoneCodeApp() {
         }
 
         BackHandler(enabled = drawerVisible) { closeDrawer() }
-        // Predictive back for the settings route: the page follows the gesture and, on commit,
-        // FINISHES its slide before the route flips - the old reset-then-reanimate handoff
-        // visibly snapped (round-4: "the animation [is] kind of too cheap-like"). The transform
-        // is keyed to the outgoing route inside AnimatedContent so it holds through the exit.
-        var backingOutRoute by remember { mutableStateOf<String?>(null) }
-        val backAnim = remember { androidx.compose.animation.core.Animatable(0f) }
-        val backScope = androidx.compose.runtime.rememberCoroutineScope()
-        androidx.activity.compose.PredictiveBackHandler(enabled = !drawerVisible && route != "chat") { events ->
-            backingOutRoute = route
-            try {
-                events.collect { backAnim.snapTo(it.progress) }
-                backAnim.animateTo(1f, androidx.compose.animation.core.tween(150))
-                route = "chat"
-            } catch (e: kotlin.coroutines.cancellation.CancellationException) {
-                // Settle back on a scope that survives the cancelled gesture coroutine.
-                backScope.launch {
-                    runCatching { backAnim.animateTo(0f, PhoneSprings.quick) }
-                    backingOutRoute = null
-                }
-            }
-        }
-        LaunchedEffect(route) {
-            if (backingOutRoute != null && route == "chat") {
-                kotlinx.coroutines.delay(320)
-                backAnim.snapTo(0f)
-                backingOutRoute = null
-            }
-        }
+        BackHandler(enabled = !drawerVisible && route != "chat") { route = "chat" }
 
-        Box(Modifier.fillMaxSize().background(colors.background)) {
+        Box(
+            Modifier.fillMaxSize().background(colors.background)
+                .anchoredDraggable(
+                    state = drawerState,
+                    orientation = Orientation.Horizontal,
+                    enabled = !showOnboarding && route == "chat",
+                    flingBehavior = drawerFling,
+                ),
+        ) {
             // ----- main pane: stays put; the drawer overlays it (Grok/ChatGPT pattern - the old
             // push-back scale read as "disabled", not depth; see revamp-diagnosis.md #8) -----
             Box(
@@ -261,30 +250,16 @@ fun PhoneCodeApp() {
                         transitionSpec = {
                             val pop = targetState == "chat"
                             (if (pop) {
-                                (slideInHorizontally(tween(380, easing = PhoneEasings.iOSStandard)) { -it / 4 }) togetherWith
-                                    slideOutHorizontally(tween(420, easing = PhoneEasings.iOSStandard)) { it }
+                                (slideInHorizontally(tween(260, easing = PhoneEasings.iOSStandard)) { -it / 4 }) togetherWith
+                                    slideOutHorizontally(tween(220, easing = PhoneEasings.iOSStandard)) { it }
                             } else {
-                                (slideInHorizontally(tween(420, easing = PhoneEasings.iOSStandard)) { it }) togetherWith
-                                    slideOutHorizontally(tween(380, easing = PhoneEasings.iOSStandard)) { -it / 4 }
+                                (slideInHorizontally(tween(260, easing = PhoneEasings.iOSStandard)) { it }) togetherWith
+                                    slideOutHorizontally(tween(220, easing = PhoneEasings.iOSStandard)) { -it / 4 }
                             }).apply { targetContentZIndex = if (pop) -1f else 1f }
                         },
                         label = "route",
                     ) { r ->
-                        Box(
-                            Modifier.graphicsLayer {
-                                // Predictive back: only the route being backed out carries the
-                                // gesture transform, held through its exit so nothing snaps. The
-                                // `r != route` guard means a stale backingOutRoute (e.g. a re-navigation
-                                // that outran the cleanup) can never make the CURRENT screen invisible.
-                                if (r == backingOutRoute && r != route) {
-                                    val t = backAnim.value
-                                    translationX = t * size.width * 0.4f
-                                    alpha = 1f - t
-                                    val s = 1f - 0.04f * t
-                                    scaleX = s; scaleY = s
-                                }
-                            },
-                        ) {
+                        Box {
                             when (r) {
                                 "settings" -> SettingsScreen(vm, settingsVm, onBack = { route = "chat" }, initialPage = settingsInitial)
                                 else -> ChatScreen(vm, onOpenDrawer = openDrawer, sendOnEnter = settings.sendOnEnter)
@@ -490,14 +465,13 @@ private fun Sidebar(
                             ) {
                                 Icon(Icons.Filled.MoreVert, "Project options", tint = colors.secondary, modifier = Modifier.size(18.dp))
                             }
-                            DropdownMenu(
+                            MorphingMenu(
                                 expanded = projectMenu?.id == project.id,
-                                onDismissRequest = { projectMenu = null },
+                                onDismiss = { projectMenu = null },
+                                above = false,
+                                alignEnd = true,
+                                anchorSize = 34.dp,
                                 modifier = Modifier.width(240.dp),
-                                shape = MaterialTheme.shapes.extraLarge,
-                                containerColor = colors.surfaceContainerHigh,
-                                tonalElevation = 6.dp,
-                                shadowElevation = 12.dp,
                             ) {
                                 ProjectOptionsMenu(
                                     project = project,
@@ -665,14 +639,13 @@ private fun ChatRow(
             contentAlignment = Alignment.Center,
         ) {
             Icon(Icons.Filled.MoreVert, "Chat options", tint = colors.secondary, modifier = Modifier.size(18.dp))
-            DropdownMenu(
+            MorphingMenu(
                 expanded = menuExpanded,
-                onDismissRequest = onDismissMenu,
+                onDismiss = onDismissMenu,
+                above = false,
+                alignEnd = true,
+                anchorSize = 32.dp,
                 modifier = Modifier.width(280.dp),
-                shape = MaterialTheme.shapes.extraLarge,
-                containerColor = colors.surfaceContainerHigh,
-                tonalElevation = 6.dp,
-                shadowElevation = 12.dp,
                 content = menuContent,
             )
         }

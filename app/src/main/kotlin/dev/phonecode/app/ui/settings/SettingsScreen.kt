@@ -120,64 +120,24 @@ private fun depthOf(page: String): Int = when {
 fun SettingsScreen(vm: ChatViewModel, settingsVm: SettingsViewModel, onBack: () -> Unit, initialPage: String = "home") {
     var page by rememberSaveable(initialPage) { mutableStateOf(initialPage) }
 
-    // Predictive back WITHIN settings: the page visibly follows the finger (translate + dim) and,
-    // on commit, finishes its slide before the route flips - no snap, no post-hoc animation
-    // (round-4: "swiping back has the animation be kind of too cheap-like").
-    var backingOut by remember { mutableStateOf<String?>(null) }
-    val backAnim = remember { androidx.compose.animation.core.Animatable(0f) }
-    val backScope = androidx.compose.runtime.rememberCoroutineScope()
-    androidx.activity.compose.PredictiveBackHandler(enabled = page != "home") { events ->
-        backingOut = page
-        try {
-            events.collect { backAnim.snapTo(it.progress) }
-            backAnim.animateTo(1f, androidx.compose.animation.core.tween(150))
-            page = parentOf(page)
-        } catch (e: kotlin.coroutines.cancellation.CancellationException) {
-            // Settle back smoothly on a scope that outlives the cancelled gesture job.
-            backScope.launch {
-                runCatching { backAnim.animateTo(0f, PhoneSprings.quick) }
-                backingOut = null
-            }
-        }
-    }
-    // After the committed pop's enter transition lands, release the held transform.
-    LaunchedEffect(page) {
-        if (backingOut != null && page == parentOf(backingOut!!)) {
-            kotlinx.coroutines.delay(440)
-            backAnim.snapTo(0f)
-            backingOut = null
-        }
-    }
+    androidx.activity.compose.BackHandler(enabled = page != "home") { page = parentOf(page) }
 
     Box(Modifier.fillMaxSize()) {
-        backingOut?.takeIf { page == it }?.let { outgoing ->
-            Box(
-                Modifier.fillMaxSize().graphicsLayer {
-                    translationX = -size.width * 0.25f * (1f - backAnim.value)
-                },
-            ) {
-                SettingsPageContent(parentOf(outgoing), vm, settingsVm, onBack) { page = it }
-            }
-        }
         AnimatedContent(
             targetState = page,
             transitionSpec = {
                 val pop = depthOf(targetState) < depthOf(initialState)
                 (if (pop) {
-                    (slideInHorizontally(tween(380, easing = PhoneEasings.iOSStandard)) { -it / 4 }) togetherWith
-                        slideOutHorizontally(tween(420, easing = PhoneEasings.iOSStandard)) { it }
+                    (slideInHorizontally(tween(260, easing = PhoneEasings.iOSStandard)) { -it / 4 }) togetherWith
+                        slideOutHorizontally(tween(220, easing = PhoneEasings.iOSStandard)) { it }
                 } else {
-                    (slideInHorizontally(tween(420, easing = PhoneEasings.iOSStandard)) { it }) togetherWith
-                        slideOutHorizontally(tween(380, easing = PhoneEasings.iOSStandard)) { -it / 4 }
+                    (slideInHorizontally(tween(260, easing = PhoneEasings.iOSStandard)) { it }) togetherWith
+                        slideOutHorizontally(tween(220, easing = PhoneEasings.iOSStandard)) { -it / 4 }
                 }).apply { targetContentZIndex = if (pop) -1f else 1f }
             },
             label = "settings",
         ) { p ->
-            Box(
-                Modifier.fillMaxSize().graphicsLayer {
-                    if (p == backingOut) translationX = backAnim.value * size.width
-                },
-            ) {
+            Box(Modifier.fillMaxSize()) {
                 SettingsPageContent(p, vm, settingsVm, onBack) { page = it }
             }
         }
@@ -460,7 +420,7 @@ private fun ProvidersPage(vm: ChatViewModel, onOpenProvider: (String) -> Unit, o
         // EncryptedSharedPreferences, so doing it per row per frame ran crypto on every toggle/recompose.
         // Keyed on state.models (changes when custom providers reload); a fresh entry after editing a key
         // on the detail page resets this remember because the page leaves the AnimatedContent composition.
-        val providers = remember(state.models) { vm.allProviders() }
+        val providers = remember(state.models) { vm.allProviders().filter { it.id != "codex" } }
         val keyedIds = remember(state.models) { providers.filter { vm.keyFor(it.id).isNotBlank() }.map { it.id }.toSet() }
         PcGroup {
             providers.forEach { preset ->

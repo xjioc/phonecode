@@ -28,6 +28,7 @@ class CodexProvider(
             .url("${preset.baseUrl.trimEnd('/')}/responses")
             .post(RequestBodyBuilders.toResponsesBody(request).toRequestBody(JSON_MEDIA))
             .header("Accept", "text/event-stream")
+            .apply { request.sessionId?.let { header("session-id", it) } }
             .applyAuth(preset, apiKey)
             .build()
         return streamSse(client, httpRequest, ResponsesStreamMapper())
