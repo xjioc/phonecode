@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.job
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okio.BufferedSource
 import java.io.IOException
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
@@ -25,6 +26,15 @@ internal interface SseStreamMapper {
 }
 
 private const val MAX_ERROR_BODY = 2048L
+private const val MAX_SSE_LINE_BYTES = 256L * 1024
+
+private fun BufferedSource.readBoundedUtf8Line(limit: Long): String? {
+    val newline = indexOf('\n'.code.toByte(), 0, limit + 1)
+    if (newline >= 0) return readUtf8Line()
+    if (buffer.size > limit) throw SseLimitException("SSE line exceeds $limit bytes")
+    if (exhausted()) return if (buffer.size == 0L) null else readUtf8()
+    throw SseLimitException("SSE line exceeds $limit bytes")
+}
 
 private fun retryableStatus(code: Int): Boolean = code in setOf(408, 409, 425, 429) || code in 500..599
 
@@ -169,7 +179,7 @@ internal fun streamSse(
                 return@use
             }
             while (true) {
-                val line = source.readUtf8Line() ?: break
+                val line = source.readBoundedUtf8Line(MAX_SSE_LINE_BYTES) ?: break
                 parser.line(line)?.let { raw -> mapper.map(raw).forEach { emit(it) } }
             }
             parser.flush()?.let { raw -> mapper.map(raw).forEach { emit(it) } }
@@ -181,6 +191,8 @@ internal fun streamSse(
 }.flowOn(Dispatchers.IO).catch { e ->
     // A cancelled call surfaces as an IOException; on stop, propagate cancellation instead of a spurious Failed.
     if (e is CancellationException) throw e
-    val retryable = e is IOException && e !is SSLHandshakeException && e !is SSLPeerUnverifiedException
-    emit(StreamEvent.Failed(e.message ?: "stream error", retryable, kind = FailureKind.NETWORK))
+    val kind = if (e is SseLimitException) FailureKind.PARSE else FailureKind.NETWORK
+    val retryable = e is IOException && e !is SSLHandshakeException &&
+        e !is SSLPeerUnverifiedException && e !is SseLimitException
+    emit(StreamEvent.Failed(e.message ?: "stream error", retryable, kind = kind))
 }

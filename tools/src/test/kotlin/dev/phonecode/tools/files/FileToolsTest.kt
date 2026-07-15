@@ -14,6 +14,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import java.io.File
+import java.nio.file.Files
 
 class FileToolsTest {
 
@@ -43,6 +44,15 @@ class FileToolsTest {
         assertFalse(read.isError)
         assertTrue(read.output.contains("1\thello"))
         assertTrue(read.output.contains("2\tworld"))
+    }
+
+    @Test fun emptyFileReadsAsEmpty() = runTest {
+        File(workspace, "empty.txt").writeText("")
+
+        val read = ReadTool().execute(args("path" to "empty.txt"), ctx)
+
+        assertFalse(read.isError)
+        assertEquals("(empty file)", read.output)
     }
 
     @Test fun editReplacesUniqueText() = runTest {
@@ -101,6 +111,19 @@ class FileToolsTest {
         assertTrue(res.output.contains("fun foo"))
     }
 
+    @Test fun searchSkipsSymlinksOutsideTheWorkspace() = runTest {
+        val outside = File.createTempFile("phonecode-secret", ".txt")
+        try {
+            outside.writeText("outside-secret")
+            Files.createSymbolicLink(File(workspace, "linked.txt").toPath(), outside.toPath())
+
+            assertEquals("(no matches)", GrepTool().execute(args("pattern" to "outside-secret"), ctx).output)
+            assertEquals("(no matches)", GlobTool().execute(args("pattern" to "*.txt"), ctx).output)
+        } finally {
+            outside.delete()
+        }
+    }
+
     @Test fun pathEscapeIsRejected() = runTest {
         val res = ReadTool().execute(args("path" to "../outside.txt"), ctx)
         assertTrue(res.isError)
@@ -120,5 +143,56 @@ class FileToolsTest {
         File(workspace, "afile").writeText("x") // a regular file, not a directory
         val res = WriteTool().execute(args("path" to "afile/child.txt", "content" to "y"), ctx)
         assertTrue(res.isError) // a clean error, not an uncaught exception
+    }
+
+    @Test fun largeReadsRequireAndHonorBounds() = runTest {
+        val file = File(workspace, "large.txt")
+        file.bufferedWriter().use { writer ->
+            repeat(1_000_001) { writer.append("line\n") }
+        }
+
+        assertTrue(ReadTool().execute(args("path" to "large.txt"), ctx).isError)
+        val bounded = ReadTool().execute(args("path" to "large.txt", "offset" to "1000000", "limit" to "2"), ctx)
+        assertFalse(bounded.isError)
+        assertTrue(bounded.output.contains("1000000\tline"))
+        assertTrue(bounded.output.contains("1000001\tline"))
+    }
+
+    @Test fun oversizedFirstLineIsReturnedAsTruncatedText() = runTest {
+        File(workspace, "minified.txt").writeText("x".repeat(60_000))
+
+        val result = ReadTool().execute(args("path" to "minified.txt"), ctx)
+
+        assertFalse(result.isError)
+        assertTrue(result.output.startsWith("1\t"))
+        assertTrue(result.output.contains("Line 1 truncated"))
+        assertFalse(result.output.contains("(empty file)"))
+    }
+
+    @Test fun boundedReadStreamsLargeSingleLineFiles() = runTest {
+        val file = File(workspace, "large-minified.txt")
+        file.writeText("x".repeat(6_000_000))
+
+        val result = ReadTool().execute(args("path" to "large-minified.txt", "offset" to "1", "limit" to "1"), ctx)
+
+        assertFalse(result.isError)
+        assertTrue(result.output.length < 51_000)
+        assertTrue(result.output.contains("Line 1 truncated"))
+    }
+
+    @Test fun directoryAndSearchResultsReportTruncation() = runTest {
+        repeat(205) { index -> File(workspace, "file-$index.kt").writeText("needle") }
+
+        assertTrue(LsTool().execute(buildJsonObject {}, ctx).output.contains("Showing 200 of 205"))
+        assertTrue(GlobTool().execute(args("pattern" to "*.kt"), ctx).output.contains("Results truncated"))
+        assertTrue(GrepTool().execute(args("pattern" to "needle"), ctx).output.contains("Results truncated"))
+    }
+
+    @Test fun writeRejectsOversizedContentWithoutChangingTheFile() = runTest {
+        val file = File(workspace, "kept.txt").apply { writeText("kept") }
+        val result = WriteTool().execute(args("path" to "kept.txt", "content" to "x".repeat(5_000_001)), ctx)
+
+        assertTrue(result.isError)
+        assertEquals("kept", file.readText())
     }
 }

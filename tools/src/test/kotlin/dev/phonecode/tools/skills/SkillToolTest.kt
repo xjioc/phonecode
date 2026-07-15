@@ -42,9 +42,19 @@ class SkillToolTest {
         assertTrue(result.isError)
     }
 
-    @Test fun missingNameIsError() = runBlocking {
+    @Test fun missingNameListsInstalledSkills() = runBlocking {
         val result = SkillTool(skills).execute(JsonObject(emptyMap()), Ctx)
-        assertTrue(result.isError)
+        assertFalse(result.isError)
+        assertTrue(result.output.contains("pdf"))
+    }
+
+    @Test fun searchFindsSkillsOmittedFromThePromptCatalog() = runBlocking {
+        val many = (1..200).map { SkillManifest("skill-$it", "Topic $it", "body") }
+
+        val result = SkillTool(many).execute(buildJsonObject { put("query", "Topic 175") }, Ctx)
+
+        assertFalse(result.isError)
+        assertTrue(result.output.contains("skill-175"))
     }
 
     @Test fun loadsBoundedRelativeResource() = runBlocking {

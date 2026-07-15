@@ -1,5 +1,6 @@
 package dev.phonecode.app.ui.theme
 
+import android.animation.ValueAnimator
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -10,7 +11,11 @@ import androidx.compose.foundation.border
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.State
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
@@ -19,6 +24,9 @@ import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.TileMode
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import kotlin.math.abs
+
+val LocalNeuralPhase = staticCompositionLocalOf<State<Float>?> { null }
 
 /**
  * The ethereal accent layer: Neural Expressive's "gradient = cognition" idea rendered entirely
@@ -38,23 +46,30 @@ object Ethereal {
 
 /** A 0→1 phase that loops forever - one slow clock drives every ethereal animation. */
 @Composable
-fun rememberNeuralPhase(durationMillis: Int = 3600): State<Float> =
-    rememberInfiniteTransition(label = "ethereal").animateFloat(
+fun rememberNeuralPhase(durationMillis: Int = 3600): State<Float> {
+    if (!ValueAnimator.areAnimatorsEnabled()) return remember { mutableFloatStateOf(0.5f) }
+    return rememberInfiniteTransition(label = "ethereal").animateFloat(
         initialValue = 0f,
         targetValue = 1f,
         animationSpec = infiniteRepeatable(tween(durationMillis, easing = LinearEasing)),
         label = "etherealPhase",
     )
+}
 
 /** A slow breathe (0→1→0) for idle "alive" pulses - unhurried, installation-like. */
 @Composable
-fun rememberNeuralBreath(durationMillis: Int = 2600): State<Float> =
-    rememberInfiniteTransition(label = "breath").animateFloat(
+fun rememberNeuralBreath(durationMillis: Int = 2600): State<Float> {
+    LocalNeuralPhase.current?.let { phase ->
+        return remember(phase) { derivedStateOf { 1f - abs(phase.value * 2f - 1f) } }
+    }
+    if (!ValueAnimator.areAnimatorsEnabled()) return remember { mutableFloatStateOf(0.5f) }
+    return rememberInfiniteTransition(label = "breath").animateFloat(
         initialValue = 0f,
         targetValue = 1f,
         animationSpec = infiniteRepeatable(tween(durationMillis, easing = LinearEasing), RepeatMode.Reverse),
         label = "etherealBreath",
     )
+}
 
 /**
  * A sweeping monochrome shimmer brush whose position follows [phase]. SEAMLESS loop: the stops
@@ -78,6 +93,8 @@ fun neuralSweepBrush(phase: Float, ink: Color, extent: Float = 660f): Brush =
 fun Modifier.neuralRing(active: Boolean, shape: Shape, width: Dp = 1.dp): Modifier {
     if (!active) return this
     val ink = MaterialTheme.colorScheme.onBackground
-    val phase by rememberNeuralPhase()
+    val shared = LocalNeuralPhase.current
+    val local = if (shared == null) rememberNeuralPhase() else null
+    val phase by requireNotNull(shared ?: local)
     return this.border(width, neuralSweepBrush(phase, ink.copy(alpha = 0.7f)), shape)
 }

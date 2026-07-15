@@ -76,6 +76,14 @@ private fun requireHttpsOrigin(git: Git, push: Boolean = false): List<URIish> {
 
 private fun URIish.isGitHub(): Boolean = host.equals("github.com", true)
 
+private fun requireSslVerification(git: Git) {
+    val config = git.repository.config
+    val scopes = listOf<String?>(null) + config.getSubsections("http")
+    require(scopes.all { config.getBoolean("http", it, "sslVerify", true) }) {
+        "http.sslVerify must remain enabled for remote operations"
+    }
+}
+
 internal fun successfulPushStatus(status: RemoteRefUpdate.Status): Boolean =
     status == RemoteRefUpdate.Status.OK || status == RemoteRefUpdate.Status.UP_TO_DATE
 
@@ -201,7 +209,7 @@ class GitLogTool : Tool {
 class GitBranchTool : Tool {
     override val name = "git_branch"
     override val description = "List branches, or create a new branch with name=<branch>."
-    override val mutating = true
+    override fun mutates(args: JsonObject): Boolean = !args.str("name").isNullOrBlank()
     override val promptSnippet = "list or create git branches"
     override val parameters = objectSchema(mapOf("name" to strSchema("New branch name to create (omit to just list)")), emptyList())
     override suspend fun execute(args: JsonObject, context: ToolContext): ToolResult {
@@ -250,6 +258,7 @@ class GitPushTool(private val credentials: suspend () -> Pair<String, String>?) 
         val creds = credentials() ?: return ToolResult("git_push: no git credentials set (add a username + token in Settings)", isError = true)
         return withRepo(context, name) { git ->
             require(requireHttpsOrigin(git, push = true).all(URIish::isGitHub)) { "origin must use GitHub HTTPS" }
+            requireSslVerification(git)
             val failures = git.push().setRemote("origin")
                 .setCredentialsProvider(UsernamePasswordCredentialsProvider(creds.first, creds.second)).call()
                 .flatMap { it.remoteUpdates }
@@ -272,6 +281,7 @@ class GitPullTool(private val credentials: suspend () -> Pair<String, String>?) 
         val creds = credentials()
         return withRepo(context, name) { git ->
             val origins = requireHttpsOrigin(git)
+            requireSslVerification(git)
             val pull = git.pull().setRemote("origin")
             if (creds != null && origins.all(URIish::isGitHub)) {
                 pull.setCredentialsProvider(UsernamePasswordCredentialsProvider(creds.first, creds.second))

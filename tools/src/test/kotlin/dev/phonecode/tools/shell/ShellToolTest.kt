@@ -2,8 +2,11 @@ package dev.phonecode.tools.shell
 
 import dev.phonecode.tools.ToolContext
 import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.JsonPrimitive
@@ -17,7 +20,10 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import java.io.File
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicReference
 
 class ShellToolTest {
 
@@ -42,6 +48,54 @@ class ShellToolTest {
     private fun backgroundArgs(command: String) = buildJsonObject {
         put("command", command)
         put("background", true)
+    }
+
+    private fun isAlive(pid: Long) = ProcessHandle.of(pid).map(ProcessHandle::isAlive).orElse(false)
+
+    private suspend fun awaitStopped(vararg pids: Long) {
+        withTimeout(5_000) {
+            while (pids.any(::isAlive)) delay(20)
+        }
+    }
+
+    private suspend fun assertConcurrentStopCatchesStart(stop: suspend (ProcessManager) -> Unit) = coroutineScope {
+        val shellEntered = CountDownLatch(1)
+        val allowLaunch = CountDownLatch(1)
+        val starts = AtomicInteger()
+        val stops = AtomicInteger()
+        val stoppingThread = AtomicReference<Thread?>()
+        val manager = ProcessManager(
+            shellProvider = {
+                shellEntered.countDown()
+                assertTrue(allowLaunch.await(5, TimeUnit.SECONDS))
+                hostShell()
+            },
+            onStarted = { starts.incrementAndGet() },
+            onStopped = { stops.incrementAndGet() },
+        )
+        val started = async(Dispatchers.IO) {
+            manager.start("exec sleep 30", context.workspacePath)
+        }
+        assertTrue(shellEntered.await(5, TimeUnit.SECONDS))
+        val stopping = async(Dispatchers.IO) {
+            stoppingThread.set(Thread.currentThread())
+            stop(manager)
+        }
+        try {
+            withTimeout(5_000) {
+                while (stoppingThread.get()?.state != Thread.State.BLOCKED) delay(5)
+            }
+        } finally {
+            allowLaunch.countDown()
+        }
+
+        val result = started.await()
+        stopping.await()
+        val id = Regex("proc-\\d+").find(result.output)?.value ?: error(result.output)
+
+        assertTrue(manager.output(id).output.contains("stopped"))
+        assertEquals(1, starts.get())
+        assertEquals(1, stops.get())
     }
 
     @Test fun runsACommandInTheWorkspace() = runBlocking {
@@ -75,20 +129,38 @@ class ShellToolTest {
     @Test fun cancellationStopsTheForegroundProcess() = runBlocking {
         assumeFalse(System.getProperty("os.name").lowercase().contains("win"))
         val pidFile = File(tmp.root, "foreground.pid")
+        val childFile = File(tmp.root, "foreground-child.pid")
         val running = async {
-            ShellTool({ hostShell() }).execute(args("echo \$\$ > foreground.pid; exec sleep 30"), context)
+            ShellTool({ hostShell() }).execute(
+                args("echo \$\$ > foreground.pid; sleep 30 & child=\$!; echo \$child > foreground-child.pid; wait \$child"),
+                context,
+            )
         }
         withTimeout(5_000) {
-            while (!pidFile.isFile) delay(20)
+            while (!pidFile.isFile || !childFile.isFile) delay(20)
         }
-        val pid = pidFile.readText().trim().toLong()
+        val pids = longArrayOf(pidFile.readText().trim().toLong(), childFile.readText().trim().toLong())
 
         running.cancelAndJoin()
 
-        withTimeout(5_000) {
-            while (ProcessHandle.of(pid).map(ProcessHandle::isAlive).orElse(false)) delay(20)
-        }
-        assertFalse(ProcessHandle.of(pid).map(ProcessHandle::isAlive).orElse(false))
+        awaitStopped(*pids)
+        assertTrue(pids.none(::isAlive))
+    }
+
+    @Test fun timeoutStopsForegroundDescendants() = runBlocking {
+        assumeFalse(System.getProperty("os.name").lowercase().contains("win"))
+        val childFile = File(tmp.root, "timeout-child.pid")
+
+        val result = ShellTool({ hostShell() }).execute(
+            args("sleep 30 & child=\$!; echo \$child > timeout-child.pid; wait \$child", 1),
+            context,
+        )
+        val pid = childFile.readText().trim().toLong()
+
+        assertTrue(result.output, result.isError)
+        assertTrue(result.output, result.output.contains("killed after 1s timeout"))
+        awaitStopped(pid)
+        assertFalse(isAlive(pid))
     }
 
     @Test fun injectedEnvironmentReachesTheProcess() = runBlocking {
@@ -129,6 +201,32 @@ class ShellToolTest {
 
         assertTrue(result.output, result.isError)
         assertTrue(result.output, result.output.contains("exited (7)"))
+    }
+
+    @Test fun fastSuccessfulBackgroundCommandIsNotAnError() = runBlocking {
+        assumeFalse(System.getProperty("os.name").lowercase().contains("win"))
+        val manager = ProcessManager({ hostShell() })
+
+        val result = manager.start("printf done", context.workspacePath)
+
+        assertFalse(result.output, result.isError)
+        assertTrue(result.output.contains("exited (0)"))
+    }
+
+    @Test fun processInspectionIsReadOnlyAndScopedToTheWorkspace() = runBlocking {
+        assumeFalse(System.getProperty("os.name").lowercase().contains("win"))
+        val manager = ProcessManager({ hostShell() })
+        val tool = ProcessTool(manager)
+        val started = manager.start("exec sleep 30", context.workspacePath)
+        val id = Regex("proc-\\d+").find(started.output)!!.value
+        val other = tmp.newFolder("other").absolutePath
+
+        assertFalse(tool.mutates(buildJsonObject { put("action", "list") }))
+        assertFalse(tool.mutates(buildJsonObject { put("action", "output"); put("session_id", id) }))
+        assertTrue(tool.mutates(buildJsonObject { put("action", "stop"); put("session_id", id) }))
+        assertEquals("No managed background processes.", manager.list(other).output)
+        assertTrue(manager.output(id, other).isError)
+        assertFalse(manager.stop(id).isError)
     }
 
     @Test fun sendsInputToManagedCommands() = runBlocking {
@@ -172,6 +270,76 @@ class ShellToolTest {
 
         assertTrue(ids.all { manager.output(it).output.contains("stopped") })
         assertEquals(ids.toSet(), stopped.toSet())
+    }
+
+    @Test fun concurrentStopAllCannotMissAStartingProcess() = runBlocking {
+        assumeFalse(System.getProperty("os.name").lowercase().contains("win"))
+        assertConcurrentStopCatchesStart { it.stopAll() }
+    }
+
+    @Test fun concurrentWorkspaceStopCannotMissAStartingProcess() = runBlocking {
+        assumeFalse(System.getProperty("os.name").lowercase().contains("win"))
+        assertConcurrentStopCatchesStart { it.stopWorkspace(context.workspacePath) }
+    }
+
+    @Test fun limitsLiveBackgroundProcessesBeforeLaunchingAnother() = runBlocking {
+        assumeFalse(System.getProperty("os.name").lowercase().contains("win"))
+        val launches = AtomicInteger()
+        val manager = ProcessManager({ launches.incrementAndGet(); hostShell() })
+
+        try {
+            val results = List(8) { async { manager.start("exec sleep 30", context.workspacePath) } }.awaitAll()
+
+            assertEquals(4, results.count { !it.isError })
+            assertEquals(4, results.count { it.isError })
+            assertTrue(results.filter { it.isError }.all { it.output.contains("background process limit reached (4)") })
+            assertEquals(4, launches.get())
+
+            val firstId = Regex("proc-\\d+").find(results.first { !it.isError }.output)!!.value
+            assertFalse(manager.stop(firstId).isError)
+            assertFalse(manager.start("exec sleep 30", context.workspacePath).isError)
+            assertEquals(5, launches.get())
+        } finally {
+            manager.stopAll()
+        }
+    }
+
+    @Test fun stopsOnlyProcessesInTheRequestedWorkspace() = runBlocking {
+        assumeFalse(System.getProperty("os.name").lowercase().contains("win"))
+        val manager = ProcessManager({ hostShell() })
+        val firstWorkspace = tmp.newFolder("first-workspace")
+        val secondWorkspace = tmp.newFolder("second-workspace")
+        val first = manager.start("exec sleep 30", firstWorkspace.absolutePath)
+        val second = manager.start("exec sleep 30", firstWorkspace.absolutePath)
+        val other = manager.start("exec sleep 30", secondWorkspace.absolutePath)
+        val firstIds = listOf(first, second).map { Regex("proc-\\d+").find(it.output)!!.value }
+        val otherId = Regex("proc-\\d+").find(other.output)!!.value
+
+        manager.stopWorkspace(File(firstWorkspace, ".").path)
+
+        assertTrue(firstIds.all { manager.output(it).output.contains("stopped") })
+        assertTrue(manager.output(otherId).output.contains("running"))
+        assertFalse(manager.stop(otherId).isError)
+    }
+
+    @Test fun stoppingManagedProcessStopsItsDescendants() = runBlocking {
+        assumeFalse(System.getProperty("os.name").lowercase().contains("win"))
+        val childFile = File(tmp.root, "managed-child.pid")
+        val manager = ProcessManager({ hostShell() })
+        val started = manager.start(
+            "sleep 30 & child=\$!; echo \$child > managed-child.pid; wait \$child",
+            context.workspacePath,
+        )
+        val id = Regex("proc-\\d+").find(started.output)!!.value
+        withTimeout(5_000) {
+            while (!childFile.isFile) delay(20)
+        }
+        val pid = childFile.readText().trim().toLong()
+
+        assertFalse(manager.stop(id).isError)
+
+        awaitStopped(pid)
+        assertFalse(isAlive(pid))
     }
 
     @Test fun persistenceFailureDoesNotStartAnUnmanagedProcess() = runBlocking {

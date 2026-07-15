@@ -16,6 +16,9 @@ import dev.phonecode.app.data.PersistedMessage
 import dev.phonecode.app.data.PersistedPart
 import dev.phonecode.app.data.PersistedRole
 import dev.phonecode.app.data.PersistedSession
+import dev.phonecode.app.data.Project
+import dev.phonecode.app.data.ProjectStore
+import dev.phonecode.app.data.SecureKeyStore
 import dev.phonecode.app.data.SessionStore
 import com.github.takahirom.roborazzi.captureRoboImage
 import com.github.takahirom.roborazzi.captureScreenRoboImage
@@ -26,6 +29,8 @@ import org.junit.rules.RuleChain
 import org.junit.runner.RunWith
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
+import org.robolectric.annotation.Implementation
+import org.robolectric.annotation.Implements
 import java.io.File
 
 /**
@@ -35,7 +40,7 @@ import java.io.File
  */
 @RunWith(AndroidJUnit4::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
-@Config(sdk = [34], qualifiers = "w412dp-h915dp-xhdpi")
+@Config(sdk = [34], qualifiers = "w412dp-h915dp-xhdpi", shadows = [ScreenshotSecureKeyStore::class])
 class ScreenshotTest {
 
     /**
@@ -49,11 +54,15 @@ class ScreenshotTest {
             val filesDir = ApplicationProvider.getApplicationContext<android.content.Context>().filesDir
             // First-run onboarding would otherwise cover the app for every test.
             File(filesDir, "app_settings.json").writeText("""{"onboarded":true}""")
+            ProjectStore(File(filesDir, "projects.json")).replace(
+                listOf(Project("project-screenshot", "PhoneCode", "folder-screenshot")),
+            )
             SessionStore(File(filesDir, "sessions")).save(
                 PersistedSession(
                     id = "session-screenshot",
                     title = "Dark mode for settings",
                     updatedAt = System.currentTimeMillis() + 3_600_000,
+                    projectId = "project-screenshot",
                     messages = listOf(
                         PersistedMessage(
                             PersistedRole.USER,
@@ -108,7 +117,7 @@ class ScreenshotTest {
     private fun dismissOnboardingIfPresent() {
         if (compose.onAllNodesWithText("Get started").fetchSemanticsNodes().isEmpty()) return
         compose.onNodeWithText("Get started").performClick()
-        compose.onNodeWithText("Continue without a project").performClick()
+        compose.onNodeWithText("Skip setup for now").performClick()
         compose.waitForIdle()
     }
 
@@ -150,9 +159,8 @@ class ScreenshotTest {
         awaitConversation()
         shoot("01-chat-conversation")
 
-        compose.onNodeWithText("Claude Opus 4.8").performClick()
+        compose.onNodeWithContentDescription("Switch model").performClick()
         shootScreen("03-model-picker")
-        compose.onAllNodesWithText("Claude Opus 4.8").onLast().performClick()
         compose.onAllNodesWithText("Done").onFirst().performClick()
         compose.waitForIdle()
 
@@ -193,4 +201,16 @@ class ScreenshotTest {
         compose.onNodeWithContentDescription("Settings").performClick()
         shoot("13-settings-root-dark")
     }
+}
+
+@Implements(SecureKeyStore::class, isInAndroidSdk = false)
+class ScreenshotSecureKeyStore {
+    @Implementation
+    fun get(name: String): String? = "screenshot-fixture-key".takeIf { name == "anthropic" }
+
+    @Implementation
+    fun getAvailable() = true
+
+    @Implementation
+    fun getSecureStorageUnavailable() = false
 }

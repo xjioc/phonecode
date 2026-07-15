@@ -18,7 +18,8 @@ class ProcessTool(
 ) : Tool {
     override val name = "process"
     override val description = "List, inspect, send input to, or stop managed background commands started by bash."
-    override val mutating = true
+    override fun mutates(args: JsonObject): Boolean =
+        (args["action"] as? JsonPrimitive)?.contentOrNull in setOf("input", "stop")
     override val parameters: JsonObject = buildJsonObject {
         put("type", "object")
         putJsonObject("properties") {
@@ -29,6 +30,7 @@ class ProcessTool(
             putJsonObject("session_id") { put("type", "string") }
             putJsonObject("data") { put("type", "string") }
             putJsonObject("append_newline") { put("type", "boolean") }
+            putJsonObject("tail_chars") { put("type", "integer"); put("minimum", 1000); put("maximum", 48000) }
         }
         put("required", JsonArray(listOf(JsonPrimitive("action"))))
     }
@@ -43,8 +45,14 @@ class ProcessTool(
             ?: return ToolResult("process: missing 'action'", true)
         val id = (args["session_id"] as? JsonPrimitive)?.contentOrNull
         return when (action) {
-            "list" -> manager.list()
-            "output" -> id?.let(manager::output) ?: ToolResult("process: output requires 'session_id'", true)
+            "list" -> manager.list(context.workspacePath)
+            "output" -> id?.let {
+                manager.output(
+                    it,
+                    context.workspacePath,
+                    (args["tail_chars"] as? JsonPrimitive)?.contentOrNull?.toIntOrNull()?.coerceIn(1_000, 48_000) ?: 12_000,
+                )
+            } ?: ToolResult("process: output requires 'session_id'", true)
             "input" -> when {
                 id == null -> ToolResult("process: input requires 'session_id'", true)
                 args["data"] !is JsonPrimitive -> ToolResult("process: input requires 'data'", true)
@@ -52,9 +60,10 @@ class ProcessTool(
                     id,
                     (args["data"] as JsonPrimitive).content,
                     (args["append_newline"] as? JsonPrimitive)?.booleanOrNull ?: true,
+                    context.workspacePath,
                 )
             }
-            "stop" -> id?.let { manager.stop(it) } ?: ToolResult("process: stop requires 'session_id'", true)
+            "stop" -> id?.let { manager.stop(it, context.workspacePath) } ?: ToolResult("process: stop requires 'session_id'", true)
             else -> ToolResult("process: unsupported action '$action'", true)
         }
     }

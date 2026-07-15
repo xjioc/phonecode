@@ -133,6 +133,74 @@ class GitToolsTest {
         }
     }
 
+    @Test fun credentialedPushRejectsDisabledSslVerification() = runBlocking {
+        val dir = Files.createTempDirectory("gitpush-ssl").toFile()
+        try {
+            val ctx = ctxFor(dir)
+            tools.getValue("git_init").execute(empty, ctx)
+            openGit(dir).use { git ->
+                git.repository.config.apply {
+                    setString("remote", "origin", "url", "https://github.com/example/repository.git")
+                    setBoolean("http", null, "sslVerify", false)
+                    save()
+                }
+            }
+            val authenticated = gitTools { "user" to "token" }.associateBy { it.name }
+
+            val push = authenticated.getValue("git_push").execute(empty, ctx)
+
+            assertTrue(push.isError)
+            assertTrue(push.output.contains("sslVerify must remain enabled"))
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
+
+    @Test fun credentialedPullRejectsUrlScopedDisabledSslVerification() = runBlocking {
+        val dir = Files.createTempDirectory("gitpull-ssl").toFile()
+        try {
+            val ctx = ctxFor(dir)
+            tools.getValue("git_init").execute(empty, ctx)
+            openGit(dir).use { git ->
+                git.repository.config.apply {
+                    setString("remote", "origin", "url", "https://github.com/example/repository.git")
+                    setBoolean("http", "https://github.com/", "sslVerify", false)
+                    save()
+                }
+            }
+            val authenticated = gitTools { "user" to "token" }.associateBy { it.name }
+
+            val pull = authenticated.getValue("git_pull").execute(empty, ctx)
+
+            assertTrue(pull.isError)
+            assertTrue(pull.output.contains("sslVerify must remain enabled"))
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
+
+    @Test fun unauthenticatedPullRejectsDisabledSslVerificationBeforeNetworkAccess() = runBlocking {
+        val dir = Files.createTempDirectory("gitpull-public-ssl").toFile()
+        try {
+            val ctx = ctxFor(dir)
+            tools.getValue("git_init").execute(empty, ctx)
+            openGit(dir).use { git ->
+                git.repository.config.apply {
+                    setString("remote", "origin", "url", "https://github.com/example/public.git")
+                    setBoolean("http", null, "sslVerify", false)
+                    save()
+                }
+            }
+
+            val pull = tools.getValue("git_pull").execute(empty, ctx)
+
+            assertTrue(pull.isError)
+            assertTrue(pull.output.contains("sslVerify must remain enabled"))
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
+
     @Test fun onlySuccessfulRemoteStatusesCountAsPushed() {
         assertTrue(successfulPushStatus(RemoteRefUpdate.Status.OK))
         assertTrue(successfulPushStatus(RemoteRefUpdate.Status.UP_TO_DATE))

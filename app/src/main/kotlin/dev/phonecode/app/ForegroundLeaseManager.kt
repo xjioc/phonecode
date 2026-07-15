@@ -42,6 +42,8 @@ class ForegroundLeaseManager(
             owners.clear()
         }
         handlers.forEach { runCatching(it) }
-        if (wasActive) stop()
+        synchronized(this) {
+            if (wasActive && owners.isEmpty()) stop()
+        }
     }
 }

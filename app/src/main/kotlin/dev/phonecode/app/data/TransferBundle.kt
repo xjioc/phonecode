@@ -5,6 +5,8 @@ import java.io.File
 import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
 import java.util.zip.ZipEntry
 import java.util.zip.ZipInputStream
 import java.util.zip.ZipOutputStream
@@ -43,11 +45,14 @@ object TransferBundle {
 
             val sessionFiles = File(filesDir, "sessions")
                 .listFiles { f -> f.isFile && f.extension == "json" } ?: emptyArray()
-            sessionFiles.sortedBy { it.name }.forEach { writeEntry(zos, "sessions/${it.name}", it) }
+            var totalBytes = 0L
+            sessionFiles.sortedBy { it.name }.forEach {
+                totalBytes = writeEntry(zos, "sessions/${it.name}", it, MAX_TOTAL_BYTES, totalBytes)
+            }
 
             KNOWN_FILES.forEach { name ->
                 val file = File(filesDir, name)
-                if (file.isFile) writeEntry(zos, name, file)
+                if (file.isFile) totalBytes = writeEntry(zos, name, file, MAX_ENTRY_BYTES, totalBytes)
             }
         }
     }
@@ -76,20 +81,40 @@ object TransferBundle {
                     when {
                         entry.isDirectory -> Unit
                         entry.name == "manifest.json" -> {
+                            if (manifestSeen) throw IOException("Backup contains more than one manifest.")
                             manifestSeen = true
-                            val manifest = runCatching {
+                            val manifest = try {
                                 json.decodeFromString(Manifest.serializer(), zis.readBounded(MAX_ENTRY_BYTES).toString(Charsets.UTF_8))
-                            }.getOrNull()
-                            if (manifest != null && manifest.version > BUNDLE_VERSION) {
+                            } catch (error: Exception) {
+                                throw IOException("Backup manifest is invalid.", error)
+                            }
+                            if (manifest.app != "phonecode" || manifest.version < 1) {
+                                throw IOException("Backup manifest is not supported.")
+                            }
+                            if (manifest.version > BUNDLE_VERSION) {
                                 throw IOException("This backup was made by a newer version of PhoneCode (format v${manifest.version}).")
                             }
                         }
                         isAllowed(entry.name) -> {
-                            val bytes = zis.readBounded(MAX_ENTRY_BYTES)
-                            totalBytes += bytes.size
-                            if (totalBytes > MAX_TOTAL_BYTES) throw IOException("Backup exceeds the ${MAX_TOTAL_BYTES / (1024 * 1024)} MB import limit.")
                             val stage = File(stagingDir, staged.size.toString())
-                            stage.writeBytes(bytes)
+                            val entryLimit = if (SESSION_ENTRY.matches(entry.name)) MAX_TOTAL_BYTES else MAX_ENTRY_BYTES
+                            stage.outputStream().use { output ->
+                                val buffer = ByteArray(16 * 1024)
+                                var entryBytes = 0L
+                                while (true) {
+                                    val count = zis.read(buffer)
+                                    if (count < 0) break
+                                    entryBytes += count
+                                    totalBytes += count
+                                    if (entryBytes > entryLimit) {
+                                        throw IOException("Backup entry exceeds the ${entryLimit / (1024 * 1024)} MB per-file limit.")
+                                    }
+                                    if (totalBytes > MAX_TOTAL_BYTES) {
+                                        throw IOException("Backup exceeds the ${MAX_TOTAL_BYTES / (1024 * 1024)} MB import limit.")
+                                    }
+                                    output.write(buffer, 0, count)
+                                }
+                            }
                             staged += entry.name to stage
                         }
                     }
@@ -102,7 +127,16 @@ object TransferBundle {
             staged.forEach { (name, stage) ->
                 val target = File(filesDir, name)
                 target.parentFile?.mkdirs()
-                target.writeBytesAtomically(stage.readBytes())
+                runCatching {
+                    Files.move(
+                        stage.toPath(),
+                        target.toPath(),
+                        StandardCopyOption.ATOMIC_MOVE,
+                        StandardCopyOption.REPLACE_EXISTING,
+                    )
+                }.getOrElse {
+                    Files.move(stage.toPath(), target.toPath(), StandardCopyOption.REPLACE_EXISTING)
+                }
             }
             return staged.size
         } finally {
@@ -125,10 +159,16 @@ object TransferBundle {
         return out.toByteArray()
     }
 
-    private fun writeEntry(zos: ZipOutputStream, name: String, file: File) {
+    private fun writeEntry(zos: ZipOutputStream, name: String, file: File, entryLimit: Long, previousTotal: Long): Long {
+        if (file.length() > entryLimit) {
+            throw IOException("$name exceeds the ${entryLimit / (1024 * 1024)} MB backup limit.")
+        }
+        val total = previousTotal + file.length()
+        if (total > MAX_TOTAL_BYTES) throw IOException("Backup exceeds the ${MAX_TOTAL_BYTES / (1024 * 1024)} MB export limit.")
         zos.putNextEntry(ZipEntry(name))
         file.inputStream().use { it.copyTo(zos) }
         zos.closeEntry()
+        return total
     }
 
     /** Whitelist check; rejects traversal ("..") , backslashes, and absolute paths outright. */

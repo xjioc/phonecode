@@ -1,9 +1,6 @@
 package dev.phonecode.app.ui.onboarding
 
 import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -11,7 +8,6 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -24,70 +20,77 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBarsPadding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.outlined.AccountTree
 import androidx.compose.material.icons.outlined.Cloud
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import dev.phonecode.app.ui.components.PcGroup
-import dev.phonecode.app.ui.components.PcRow
 import dev.phonecode.app.R
+import dev.phonecode.app.ui.components.PcButton
+import dev.phonecode.app.ui.components.PcGroup
+import dev.phonecode.app.ui.components.PcIconButton
+import dev.phonecode.app.ui.components.PcRow
 import dev.phonecode.app.ui.theme.PhoneEasings
-import dev.phonecode.app.ui.theme.PhoneSprings
-import dev.phonecode.app.ui.theme.PhoneTweens
-import dev.phonecode.app.ui.theme.ShapePill
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 
-/**
- * First-run onboarding (round-4): a welcome beat, then the three ways into a working setup -
- * Codex sign-in, an API key, GitHub for repos. Each option deep-links into the existing settings
- * flow rather than duplicating it; everything is skippable. Monochrome, staggered spring
- * entrances, connected-card options - the app's own design language from the first frame.
- */
 @Composable
 fun OnboardingScreen(
+    step: Int,
+    onStepChange: (Int) -> Unit,
     onConnectModels: () -> Unit,
     onConnectGitHub: () -> Unit,
     onCreateProject: () -> Unit,
+    modelReady: Boolean = false,
+    githubReady: Boolean = false,
+    projectReady: Boolean = false,
     onDone: () -> Unit,
 ) {
     val colors = MaterialTheme.colorScheme
-    var step by rememberSaveable { mutableStateOf(0) }
-    androidx.activity.compose.BackHandler(enabled = step > 0) { step = 0 }
+    androidx.activity.compose.BackHandler(enabled = step > 0) { onStepChange(0) }
 
     Box(Modifier.fillMaxSize().background(colors.background).systemBarsPadding()) {
         AnimatedContent(
             targetState = step,
             transitionSpec = {
-                (slideInHorizontally(tween(260, easing = PhoneEasings.iOSStandard)) { it / 3 } + fadeIn(tween(220))) togetherWith
-                    (slideOutHorizontally(tween(220, easing = PhoneEasings.iOSStandard)) { -it / 4 } + fadeOut(tween(160)))
+                val forward = targetState > initialState
+                val enterOffset: (Int) -> Int = { if (forward) it / 3 else -it / 3 }
+                val exitOffset: (Int) -> Int = { if (forward) -it / 4 else it / 4 }
+                (slideInHorizontally(tween(240, easing = PhoneEasings.iOSStandard), enterOffset) +
+                    fadeIn(tween(180, easing = PhoneEasings.iOSStandard))) togetherWith
+                    (slideOutHorizontally(tween(160, easing = PhoneEasings.iOSStandard), exitOffset) +
+                        fadeOut(tween(120, easing = PhoneEasings.iOSStandard)))
             },
             label = "onboarding",
-        ) { s ->
-            when (s) {
-                0 -> Welcome(onNext = { step = 1 })
-                else -> Connect(
+        ) { currentStep ->
+            if (currentStep == 0) {
+                Welcome(onNext = { onStepChange(1) })
+            } else {
+                Connect(
+                    onBack = { onStepChange(0) },
                     onConnectModels = onConnectModels,
                     onConnectGitHub = onConnectGitHub,
                     onCreateProject = onCreateProject,
+                    modelReady = modelReady,
+                    githubReady = githubReady,
+                    projectReady = projectReady,
+                    onDone = onDone,
                     onSkip = onDone,
                 )
             }
@@ -95,120 +98,179 @@ fun OnboardingScreen(
     }
 }
 
-/** Staggered entrance: fade + small rise, offset by [delayMs] - the welcome page's rhythm. */
-@Composable
-private fun Modifier.entrance(delayMs: Int): Modifier {
-    val alpha = remember { Animatable(0f) }
-    val rise = remember { Animatable(10f) }
-    LaunchedEffect(Unit) {
-        delay(delayMs.toLong())
-        launch { alpha.animateTo(1f, tween(240, easing = PhoneEasings.emphasizedDecelerate)) }
-        rise.animateTo(0f, spring(dampingRatio = 1f, stiffness = Spring.StiffnessMediumLow))
-    }
-    return graphicsLayer {
-        this.alpha = alpha.value
-        translationY = rise.value.dp.toPx()
-    }
-}
-
 @Composable
 private fun Welcome(onNext: () -> Unit) {
     val colors = MaterialTheme.colorScheme
     Column(
-        Modifier.fillMaxSize().padding(horizontal = 32.dp),
+        Modifier.fillMaxSize().padding(horizontal = 20.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Spacer(Modifier.weight(1f))
-        Row(
-            Modifier.entrance(0),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        Column(
+            Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 28.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
         ) {
-            Icon(
-                painter = painterResource(R.drawable.ic_phonecode_mark),
-                contentDescription = null,
-                tint = colors.onBackground,
-                modifier = Modifier.size(44.dp),
-            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
+                    Icon(
+                        painter = painterResource(R.drawable.ic_phonecode_mark),
+                        contentDescription = null,
+                        tint = colors.onBackground,
+                        modifier = Modifier.size(36.dp),
+                    )
+                }
+                Text(
+                    "PhoneCode",
+                    style = MaterialTheme.typography.headlineLarge.copy(fontWeight = FontWeight.SemiBold),
+                    color = colors.onBackground,
+                )
+            }
+            Spacer(Modifier.height(28.dp))
             Text(
-                "PhoneCode",
-                style = MaterialTheme.typography.headlineLarge.copy(fontWeight = FontWeight.SemiBold),
+                "Build real projects from your phone",
+                style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.SemiBold),
                 color = colors.onBackground,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.semantics { heading() },
             )
+            Spacer(Modifier.height(10.dp))
+            Text(
+                "Run an AI coding agent inside folders you choose, with the models and tools you trust.",
+                style = MaterialTheme.typography.bodyLarge,
+                color = colors.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+            )
+            Spacer(Modifier.height(28.dp))
+            PcGroup {
+                FeatureRow(Icons.Outlined.Folder, "Real project folders", "Keep chats and files together")
+                FeatureRow(Icons.Outlined.AccountTree, "A complete local workspace", "Run tools and manage source control")
+                FeatureRow(Icons.Outlined.Cloud, "Your choice of model", "Sign in or use your own provider keys")
+            }
         }
-        Spacer(Modifier.height(18.dp))
-        Text(
-            "An AI coding agent that lives on your phone. Your keys, your repos, your device.",
-            style = MaterialTheme.typography.bodyLarge,
-            color = colors.onSurfaceVariant,
-            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-            modifier = Modifier.entrance(100),
+        PcButton(
+            text = "Get started",
+            modifier = Modifier.heightIn(min = 56.dp),
+            onClick = onNext,
         )
-        Spacer(Modifier.weight(1f))
-        BigButton("Get started", filled = true, modifier = Modifier.entrance(280)) { onNext() }
-        Spacer(Modifier.height(40.dp))
+        Spacer(Modifier.height(24.dp))
     }
 }
 
 @Composable
-private fun Connect(onConnectModels: () -> Unit, onConnectGitHub: () -> Unit, onCreateProject: () -> Unit, onSkip: () -> Unit) {
+private fun Connect(
+    onBack: () -> Unit,
+    onConnectModels: () -> Unit,
+    onConnectGitHub: () -> Unit,
+    onCreateProject: () -> Unit,
+    modelReady: Boolean,
+    githubReady: Boolean,
+    projectReady: Boolean,
+    onDone: () -> Unit,
+    onSkip: () -> Unit,
+) {
     val colors = MaterialTheme.colorScheme
-    Column(Modifier.fillMaxSize().padding(horizontal = 20.dp)) {
-        Spacer(Modifier.height(72.dp))
-        Text(
-            "Start with a project",
-            style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.SemiBold),
-            color = colors.onBackground,
-            modifier = Modifier.entrance(0).padding(horizontal = 12.dp),
-        )
-        Spacer(Modifier.height(8.dp))
-        Text(
-            "A project links a folder on your phone with its chats, tools and working context. You stay in control of folder access.",
-            style = MaterialTheme.typography.bodyLarge,
-            color = colors.onSurfaceVariant,
-            modifier = Modifier.entrance(70).padding(horizontal = 12.dp),
-        )
-        Spacer(Modifier.height(24.dp))
-        Box(Modifier.entrance(150)) {
+    Column(Modifier.fillMaxSize()) {
+        Row(
+            Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(horizontal = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            PcIconButton(Icons.AutoMirrored.Filled.ArrowBack, "Back", onClick = onBack)
+            Text(
+                "Setup",
+                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+                color = colors.onBackground,
+                modifier = Modifier.weight(1f).padding(start = 4.dp),
+            )
+            Text(
+                "2 of 2",
+                style = MaterialTheme.typography.labelLarge,
+                color = colors.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 12.dp),
+            )
+        }
+        Column(
+            Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp, vertical = 24.dp),
+        ) {
+            Text(
+                "Get ready to build",
+                style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.SemiBold),
+                color = colors.onBackground,
+                modifier = Modifier.semantics { heading() },
+            )
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "Connect one model, then choose the workspace and services you want. You can return here after each step.",
+                style = MaterialTheme.typography.bodyLarge,
+                color = colors.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(24.dp))
+            Spacer(Modifier.height(12.dp))
             PcGroup {
-                OptionRow(
-                    icon = Icons.Outlined.Folder,
-                    title = "Choose a project folder",
-                    sub = "Give the agent access only to the folder you select",
-                    onClick = onCreateProject,
-                )
                 OptionRow(
                     icon = Icons.Outlined.Cloud,
                     title = "Connect a model",
-                    sub = "Sign in with ChatGPT or add a provider key",
+                    sub = if (modelReady) "Ready" else "Required · sign in or add a provider key",
+                    complete = modelReady,
                     onClick = onConnectModels,
                 )
                 OptionRow(
+                    icon = Icons.Outlined.Folder,
+                    title = "Choose a project folder",
+                    sub = if (projectReady) "Ready" else "Optional · use a folder from your phone",
+                    complete = projectReady,
+                    onClick = onCreateProject,
+                )
+                OptionRow(
                     icon = Icons.Outlined.AccountTree,
-                    title = "Sign in with GitHub",
-                    sub = "Clone, push and pull your repositories",
+                    title = "Connect GitHub",
+                    sub = if (githubReady) "Ready" else "Optional · pull and push repositories",
+                    complete = githubReady,
                     onClick = onConnectGitHub,
                 )
             }
         }
-        Spacer(Modifier.weight(1f))
-        Box(Modifier.entrance(240).fillMaxWidth()) {
+        PcButton(
+            text = "Continue to PhoneCode",
+            enabled = modelReady,
+            modifier = Modifier.padding(horizontal = 20.dp).heightIn(min = 56.dp),
+            onClick = onDone,
+        )
+        if (!modelReady) {
             Text(
-                "Continue without a project",
-                style = MaterialTheme.typography.bodyLarge,
+                "Connect a model to continue, or skip and do it later.",
+                style = MaterialTheme.typography.bodySmall,
                 color = colors.onSurfaceVariant,
-                modifier = Modifier
-                    .align(Alignment.Center)
-                    .clickable(onClick = onSkip)
-                    .padding(horizontal = 24.dp, vertical = 14.dp),
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 4.dp),
             )
         }
-        Spacer(Modifier.height(28.dp))
+        TextButton(
+            onClick = onSkip,
+            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).padding(horizontal = 20.dp),
+        ) {
+            Text("Skip setup for now")
+        }
+        Spacer(Modifier.height(16.dp))
     }
 }
 
 @Composable
-private fun OptionRow(icon: ImageVector, title: String, sub: String, onClick: () -> Unit) {
+private fun FeatureRow(icon: ImageVector, title: String, sub: String) {
+    val colors = MaterialTheme.colorScheme
+    PcRow {
+        Icon(icon, null, tint = colors.onSurfaceVariant, modifier = Modifier.size(22.dp))
+        Column(Modifier.weight(1f).padding(vertical = 4.dp)) {
+            Text(title, style = MaterialTheme.typography.bodyLarge, color = colors.onBackground)
+            Text(sub, style = MaterialTheme.typography.bodyMedium, color = colors.onSurfaceVariant)
+        }
+    }
+}
+
+@Composable
+private fun OptionRow(icon: ImageVector, title: String, sub: String, complete: Boolean, onClick: () -> Unit) {
     val colors = MaterialTheme.colorScheme
     PcRow(onClick = onClick) {
         Icon(icon, null, tint = colors.onSurfaceVariant, modifier = Modifier.size(24.dp))
@@ -216,24 +278,11 @@ private fun OptionRow(icon: ImageVector, title: String, sub: String, onClick: ()
             Text(title, style = MaterialTheme.typography.bodyLarge, color = colors.onBackground)
             Text(sub, style = MaterialTheme.typography.bodyMedium, color = colors.onSurfaceVariant, modifier = Modifier.padding(top = 1.dp))
         }
-        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = colors.tertiary, modifier = Modifier.size(20.dp))
-    }
-}
-
-/** Full-width 56dp M3-Expressive pill button. */
-@Composable
-private fun BigButton(text: String, filled: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
-    val colors = MaterialTheme.colorScheme
-    Box(
-        modifier.fillMaxWidth().heightIn(min = 56.dp)
-            .background(if (filled) colors.primary else colors.surfaceContainerHigh, ShapePill)
-            .clickable(onClick = onClick),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(
-            text,
-            style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium),
-            color = if (filled) colors.onPrimary else colors.onBackground,
+        Icon(
+            if (complete) Icons.Filled.Check else Icons.AutoMirrored.Filled.KeyboardArrowRight,
+            null,
+            tint = if (complete) colors.primary else colors.tertiary,
+            modifier = Modifier.size(20.dp),
         )
     }
 }

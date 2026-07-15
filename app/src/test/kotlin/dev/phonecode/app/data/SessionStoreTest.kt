@@ -3,15 +3,22 @@ package dev.phonecode.app.data
 import dev.phonecode.provider.domain.ChatMessage
 import dev.phonecode.provider.domain.MessagePart
 import dev.phonecode.provider.domain.Role
+import dev.phonecode.tools.todo.TodoItem
+import dev.phonecode.tools.todo.TodoPriority
+import dev.phonecode.tools.todo.TodoStatus
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import java.io.File
 import java.nio.file.Files
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 
 class SessionStoreTest {
 
@@ -62,6 +69,148 @@ class SessionStoreTest {
         assertTrue(store.list().isEmpty())
     }
 
+    @Test fun createNeverOverwritesAnExistingCheckpoint() {
+        store.save(PersistedSession("x", "Started", 2L, sample.map { it.toPersisted() }))
+
+        assertFalse(store.create(PersistedSession("x", "New chat", 1L, emptyList())))
+        assertEquals(sample, store.load("x")!!.messages.map { it.toDomain() })
+    }
+
+    @Test fun checkpointCreatesFirstSave() {
+        val todos = listOf(TodoItem("1", "Inspect", TodoStatus.IN_PROGRESS, TodoPriority.HIGH))
+        val checkpoint = PersistedSession(
+            "new",
+            "First title",
+            2L,
+            sample.map { it.toPersisted() },
+            "project",
+            activeTurn = true,
+            todos = todos,
+        )
+
+        assertEquals(checkpoint, store.checkpoint(checkpoint))
+        assertEquals(checkpoint, store.load("new"))
+    }
+
+    @Test fun lateCancellationCannotRollbackImmediateResendCheckpoint() {
+        val first = PersistedMessage(PersistedRole.USER, listOf(PersistedPart.Text("first")))
+        val second = PersistedMessage(PersistedRole.USER, listOf(PersistedPart.Text("second")))
+        store.save(PersistedSession("race", "First", 1L, listOf(first), activeTurn = true))
+
+        val cancelled = PersistedSession("race", "First", 2L, listOf(first), activeTurn = false)
+        val resent = PersistedSession("race", "First", 3L, listOf(first, second), activeTurn = true)
+        store.checkpoint(resent, writeOrder = 2L)
+        store.checkpoint(cancelled, writeOrder = 1L)
+
+        assertEquals(resent, store.load("race"))
+    }
+
+    @Test fun lateCheckpointCannotRecreateDeletedSession() {
+        val initial = PersistedSession("race", "First", 1L, sample.map { it.toPersisted() }, activeTurn = true)
+        store.checkpoint(initial, writeOrder = 1L)
+        val staleWriter = SessionStore(dir)
+
+        store.delete("race")
+        staleWriter.checkpoint(initial.copy(updatedAt = 2L, activeTurn = false), writeOrder = 2L)
+        staleWriter.setActiveTurn("race", false, writeOrder = 3L)
+
+        assertNull(store.load("race"))
+        assertFalse(File(dir, "race.json").exists())
+    }
+
+    @Test fun explicitCreateClearsDeletionTombstone() {
+        store.save(PersistedSession("race", "Old", 1L, emptyList()))
+        store.delete("race")
+        val replacement = PersistedSession("race", "Replacement", 2L, emptyList())
+
+        assertTrue(store.create(replacement))
+        val updated = replacement.copy(updatedAt = 3L, messages = sample.map { it.toPersisted() })
+        store.checkpoint(updated, writeOrder = 1L)
+
+        assertEquals(updated, store.load("race"))
+    }
+
+    @Test fun externalRestoreRejectsStaleCheckpointsAcrossInstances() {
+        val stale = PersistedSession("race", "Stale", 1L, sample.map { it.toPersisted() }, activeTurn = true)
+        store.save(stale)
+        val staleWriter = SessionStore(dir)
+        store.delete("race")
+        val restored = PersistedSession("race", "Restored", 2L, emptyList())
+
+        store.reconcileExternalRestore(10L) {
+            File(dir, "race.json").writeText(storeJson.encodeToString(PersistedSession.serializer(), restored))
+        }
+        staleWriter.checkpoint(stale.copy(updatedAt = 3L), writeOrder = 9L)
+        staleWriter.checkpoint(stale.copy(updatedAt = 4L))
+
+        assertEquals(restored, store.load("race"))
+    }
+
+    @Test fun externalRestoreAcceptsFutureOrderedCheckpoint() {
+        val restored = PersistedSession("race", "Restored", 1L, emptyList())
+        store.reconcileExternalRestore(10L) {
+            File(dir, "race.json").writeText(storeJson.encodeToString(PersistedSession.serializer(), restored))
+        }
+        val updated = restored.copy(updatedAt = 2L, messages = sample.map { it.toPersisted() })
+
+        SessionStore(dir).checkpoint(updated, writeOrder = 11L)
+
+        assertEquals(updated, store.load("race"))
+    }
+
+    @Test fun checkpointCannotLoseConcurrentRenameOrPin() {
+        val executor = Executors.newFixedThreadPool(2)
+        try {
+            repeat(100) { index ->
+                store.save(
+                    PersistedSession(
+                        "race",
+                        "Original",
+                        index.toLong(),
+                        emptyList(),
+                        "project",
+                        archived = true,
+                    ),
+                )
+                val start = CountDownLatch(1)
+                val todos = listOf(TodoItem("1", "Inspect", TodoStatus.IN_PROGRESS, TodoPriority.HIGH))
+                val transcript = executor.submit {
+                    start.await()
+                    store.checkpoint(
+                        PersistedSession(
+                            "race",
+                            "Stale title",
+                            index + 1L,
+                            sample.map { it.toPersisted() },
+                            activeTurn = true,
+                            todos = todos,
+                        ),
+                    )
+                }
+                val metadata = executor.submit {
+                    start.await()
+                    store.rename("race", "Renamed")
+                    store.setPinned("race", true)
+                }
+                start.countDown()
+                transcript.get(5, TimeUnit.SECONDS)
+                metadata.get(5, TimeUnit.SECONDS)
+
+                val saved = store.load("race")!!
+                assertEquals("Renamed", saved.title)
+                assertTrue(saved.pinned)
+                assertEquals("project", saved.projectId)
+                assertTrue(saved.archived)
+                assertEquals(index + 1L, saved.updatedAt)
+                assertEquals(sample, saved.messages.map { it.toDomain() })
+                assertTrue(saved.activeTurn)
+                assertEquals(todos, saved.todos)
+            }
+        } finally {
+            executor.shutdownNow()
+        }
+    }
+
     @Test fun loadMissingReturnsNull() {
         assertNull(store.load("nope"))
     }
@@ -102,5 +251,20 @@ class SessionStoreTest {
         assertTrue(session.pinned)
         assertTrue(session.archived)
         assertTrue(session.activeTurn)
+    }
+
+    @Test fun persistsSessionTodoState() {
+        val todos = listOf(TodoItem("1", "Verify the build", TodoStatus.IN_PROGRESS, TodoPriority.HIGH))
+
+        store.save(PersistedSession("todo", "Todo", 1L, emptyList(), todos = todos))
+
+        assertEquals(todos, store.load("todo")!!.todos)
+    }
+
+    @Test fun rejectsInvalidSessionIds() {
+        assertNull(store.load("../../config"))
+        assertThrows(IllegalArgumentException::class.java) {
+            store.save(PersistedSession("../../config", "Bad", 1L, emptyList()))
+        }
     }
 }

@@ -3,7 +3,9 @@ package dev.phonecode.tools.todo
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.serialization.Serializable
 
+@Serializable
 enum class TodoStatus(val wire: String) {
     PENDING("pending"),
     IN_PROGRESS("in_progress"),
@@ -16,6 +18,7 @@ enum class TodoStatus(val wire: String) {
     }
 }
 
+@Serializable
 enum class TodoPriority(val wire: String) {
     HIGH("high"), MEDIUM("medium"), LOW("low");
 
@@ -25,6 +28,7 @@ enum class TodoPriority(val wire: String) {
     }
 }
 
+@Serializable
 data class TodoItem(val id: String, val content: String, val status: TodoStatus, val priority: TodoPriority)
 
 /**

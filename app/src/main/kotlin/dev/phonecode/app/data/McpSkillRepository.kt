@@ -7,9 +7,11 @@ import dev.phonecode.tools.mcp.decodeMcpConfig
 import dev.phonecode.tools.mcp.serialize
 import dev.phonecode.tools.skills.SkillManifest
 import dev.phonecode.tools.skills.parseSkillMarkdown
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import java.io.File
 import java.security.MessageDigest
+import java.util.UUID
 
 sealed interface McpConfigLoad {
     data class Ready(val config: McpConfig) : McpConfigLoad
@@ -38,19 +40,37 @@ data class SkillInventory(val items: List<ManagedSkill>) {
 
 data class RuntimeConfigFingerprint(val mcp: String, val skills: String)
 
+fun isSafeMcpEndpoint(value: String): Boolean {
+    val uri = runCatching { java.net.URI(value) }.getOrNull() ?: return false
+    val host = uri.host?.lowercase()?.removePrefix("[")?.removeSuffix("]") ?: return false
+    if (uri.userInfo != null || host.isBlank()) return false
+    return uri.scheme.equals("https", true) || uri.scheme.equals("http", true) &&
+        host in setOf("localhost", "127.0.0.1", "::1")
+}
+
 class InvalidMcpConfigException(message: String) : IllegalStateException(message)
 
-class McpSkillRepository(private val configDir: File) {
+class McpSkillRepository(
+    private val configDir: File,
+    private val secrets: SecretValueStore? = null,
+    private val mcpFileWriter: (File, String) -> Unit = { file, text -> file.writeTextAtomically(text) },
+) {
     private val mcpFile = File(configDir, "opencode.json")
+    private val mcpSecretStateFile = File(configDir, ".mcp-secret-state.json")
     private val skillStateFile = File(configDir, "skills-state.json")
 
+    @Synchronized
     fun loadMcpConfigState(): McpConfigLoad {
         if (!mcpFile.exists()) return McpConfigLoad.Ready(McpConfig())
         val raw = runCatching { mcpFile.readText() }.getOrElse {
             return McpConfigLoad.Invalid("", "MCP configuration could not be read")
         }
-        return runCatching { McpConfigLoad.Ready(decodeMcpConfig(raw)) }
-            .getOrElse { McpConfigLoad.Invalid(raw, "MCP configuration is invalid") }
+        return runCatching {
+            val stored = storeJson.decodeFromString(StoredMcpConfig.serializer(), raw)
+            val config = validateMcpConfig(McpConfig(stored.mcp))
+            McpConfigLoad.Ready(hydrateMcpHeaders(config, stored.secretState ?: loadMcpSecretState()))
+        }
+            .getOrElse { McpConfigLoad.Invalid(raw, it.message ?: "MCP configuration is invalid") }
     }
 
     fun loadMcpConfig(): McpConfig = when (val loaded = loadMcpConfigState()) {
@@ -61,16 +81,17 @@ class McpSkillRepository(private val configDir: File) {
     @Synchronized
     fun saveMcpConfig(config: McpConfig): Result<Unit> = runCatching {
         requireValidMcpConfig()
+        val validated = validateMcpConfig(config)
         configDir.mkdirs()
-        mcpFile.writeTextAtomically(config.serialize())
+        persistMcpConfig(validated)
     }
 
     @Synchronized
     fun replaceMcpConfig(raw: String): Result<McpConfig> = runCatching {
         require(raw.toByteArray().size <= MAX_MCP_CONFIG_BYTES) { "MCP configuration is too large" }
-        val config = decodeMcpConfig(raw)
+        val config = validateMcpConfig(decodeMcpConfig(raw))
         configDir.mkdirs()
-        mcpFile.writeTextAtomically(config.serialize())
+        persistMcpConfig(config)
         config
     }
 
@@ -78,10 +99,14 @@ class McpSkillRepository(private val configDir: File) {
         originalName: String? = null,
         name: String,
         server: McpServerConfig,
+        expectedServer: McpServerConfig? = null,
     ): Result<McpConfig> = mutateMcpConfig { current ->
         val finalName = name.trim()
         require(finalName.isNotEmpty()) { "Server name is required" }
         if (originalName != null) require(originalName in current.mcp) { "Server does not exist" }
+        if (expectedServer != null) {
+            require(current.mcp[originalName ?: finalName] == expectedServer) { "Server changed outside this editor; reload it first" }
+        }
         require(finalName == originalName || finalName !in current.mcp) { "Server name already exists" }
         val servers = current.mcp.toMutableMap()
         if (originalName != null && originalName != finalName) servers.remove(originalName)
@@ -100,7 +125,7 @@ class McpSkillRepository(private val configDir: File) {
     }
 
     fun runtimeFingerprint(projectDir: File? = null): RuntimeConfigFingerprint = RuntimeConfigFingerprint(
-        mcp = fingerprint(listOf(mcpFile)),
+        mcp = fingerprint(listOf(mcpFile, mcpSecretStateFile)),
         skills = fingerprint(buildList {
             add(skillStateFile)
             skillRootCandidates(projectDir).forEach { root ->
@@ -139,6 +164,13 @@ class McpSkillRepository(private val configDir: File) {
         bytes.toString(Charsets.UTF_8)
     }
 
+    fun readSkill(id: String, projectDir: File? = null): Result<String> = runCatching {
+        val item = scanSkills(projectDir).items.firstOrNull { it.id == id } ?: error("Skill does not exist")
+        val file = File(item.location).canonicalFile
+        require(file.isFile && file.length() <= MAX_SKILL_RESOURCE_BYTES) { "Skill file is unavailable" }
+        file.readText()
+    }
+
     @Synchronized
     fun writeSkillFile(
         scope: SkillScope,
@@ -154,6 +186,24 @@ class McpSkillRepository(private val configDir: File) {
             require(manifest.name == name) { "Skill name must match its folder" }
         }
         val file = resolveEditableSkillFile(scope, name, path, projectDir, createRoot = true)
+        file.writeTextAtomically(content)
+    }
+
+    @Synchronized
+    fun writeSkill(
+        id: String,
+        content: String,
+        projectDir: File? = null,
+        expectedContent: String? = null,
+    ): Result<Unit> = runCatching {
+        require(content.toByteArray().size <= MAX_SKILL_RESOURCE_BYTES) { "Skill file is too large" }
+        require('\u0000' !in content) { "Skill file must be text" }
+        val item = scanSkills(projectDir).items.firstOrNull { it.id == id } ?: error("Skill does not exist")
+        val manifest = parseSkillMarkdown(content) ?: error("Invalid SKILL.md frontmatter")
+        require(manifest.name == item.name) { "Rename a skill by creating a new one" }
+        val file = File(item.location).canonicalFile
+        require(file.absolutePath == id && file.isFile) { "Skill file is unavailable" }
+        if (expectedContent != null) require(file.readText() == expectedContent) { "Skill changed outside this editor; reload it first" }
         file.writeTextAtomically(content)
     }
 
@@ -226,15 +276,133 @@ class McpSkillRepository(private val configDir: File) {
 
     @Synchronized
     private fun mutateMcpConfig(transform: (McpConfig) -> McpConfig): Result<McpConfig> = runCatching {
-        val updated = transform(requireValidMcpConfig())
+        val updated = validateMcpConfig(transform(requireValidMcpConfig()))
         configDir.mkdirs()
-        mcpFile.writeTextAtomically(updated.serialize())
+        persistMcpConfig(updated)
         updated
+    }
+
+    private fun hydrateMcpHeaders(config: McpConfig, state: McpSecretState): McpConfig {
+        val store = secrets ?: return config
+        val plaintext = config.mcp.filterValues { it.headers.isNotEmpty() }
+        if ((state.names.isNotEmpty() || plaintext.isNotEmpty()) && !store.available) {
+            error("Secure storage is unavailable; MCP credentials are locked")
+        }
+        val hydrated = McpConfig(config.mcp.mapValues { (name, server) ->
+            when {
+                server.headers.isNotEmpty() -> server
+                name in state.names -> {
+                    val raw = store.get(mcpSecretKey(name, state)) ?: error("Encrypted MCP credentials are unavailable")
+                    val headers = storeJson.decodeFromString(StoredMcpHeaders.serializer(), raw).values
+                    server.copy(headers = headers)
+                }
+                else -> server
+            }
+        })
+        if (plaintext.isNotEmpty() || state.names.isNotEmpty() && state.version < MCP_SECRET_STATE_VERSION) {
+            persistMcpConfig(hydrated)
+        }
+        return hydrated
+    }
+
+    private fun persistMcpConfig(config: McpConfig) {
+        val store = secrets
+        if (store == null) {
+            mcpFileWriter(mcpFile, config.serialize())
+            return
+        }
+        val secured = config.mcp.filterValues { it.headers.isNotEmpty() }
+        val previous = currentMcpSecretState()
+        if ((secured.isNotEmpty() || previous.names.isNotEmpty()) && !store.available) {
+            error("Secure storage is unavailable; MCP credentials cannot be changed")
+        }
+        val next = McpSecretState(
+            names = secured.keys,
+            revision = if (secured.isEmpty()) "" else UUID.randomUUID().toString(),
+            version = MCP_SECRET_STATE_VERSION,
+        )
+        val sanitized = McpConfig(config.mcp.mapValues { (_, server) -> server.copy(headers = emptyMap()) })
+        val encoded = storeJson.encodeToString(
+            StoredMcpConfig.serializer(),
+            StoredMcpConfig(sanitized.mcp, next),
+        )
+        require(encoded.toByteArray().size <= MAX_MCP_CONFIG_BYTES) { "MCP configuration is too large" }
+        try {
+            secured.forEach { (name, server) ->
+                store.put(
+                    mcpSecretKey(name, next),
+                    storeJson.encodeToString(StoredMcpHeaders.serializer(), StoredMcpHeaders(server.headers)),
+                )
+            }
+        } catch (failure: Throwable) {
+            clearMcpSecrets(store, next)
+            throw failure
+        }
+        try {
+            mcpFileWriter(mcpFile, encoded)
+        } catch (failure: Throwable) {
+            if (mcpFile.snapshotText() != encoded) {
+                clearMcpSecrets(store, next)
+                throw failure
+            }
+        }
+        runCatching { saveMcpSecretState(next) }
+        clearMcpSecrets(store, previous)
+    }
+
+    private fun File.snapshotText(): String? = if (exists()) readText() else null
+
+    private fun currentMcpSecretState(): McpSecretState {
+        val embedded = mcpFile.snapshotText()?.let { raw ->
+            runCatching { storeJson.decodeFromString(StoredMcpConfig.serializer(), raw).secretState }.getOrNull()
+        }
+        return embedded ?: loadMcpSecretState()
+    }
+
+    private fun clearMcpSecrets(store: SecretValueStore, state: McpSecretState) {
+        state.names.forEach { name -> runCatching { store.put(mcpSecretKey(name, state), "") } }
+    }
+
+    private fun mcpSecretKey(name: String, state: McpSecretState): String =
+        if (state.version >= MCP_SECRET_STATE_VERSION && state.revision.isNotBlank()) {
+            "mcp.headers.${state.revision}.$name"
+        } else {
+            "mcp.headers.$name"
+        }
+
+    private fun loadMcpSecretState(): McpSecretState = if (mcpSecretStateFile.isFile) {
+        try {
+            storeJson.decodeFromString(McpSecretState.serializer(), mcpSecretStateFile.readText())
+        } catch (error: Exception) {
+            throw InvalidMcpConfigException("MCP credential metadata is invalid")
+        }
+    } else {
+        McpSecretState()
+    }
+
+    private fun saveMcpSecretState(state: McpSecretState) {
+        mcpFileWriter(mcpSecretStateFile, storeJson.encodeToString(McpSecretState.serializer(), state))
     }
 
     private fun requireValidMcpConfig(): McpConfig = when (val loaded = loadMcpConfigState()) {
         is McpConfigLoad.Ready -> loaded.config
         is McpConfigLoad.Invalid -> throw InvalidMcpConfigException(loaded.message)
+    }
+
+    private fun validateMcpConfig(config: McpConfig): McpConfig {
+        require(config.mcp.size <= MAX_MCP_SERVERS) { "Too many MCP servers" }
+        config.mcp.forEach { (name, server) ->
+            require(name.length <= 80 && MCP_NAME.matches(name)) { "Invalid MCP server name" }
+            require(server.type == "remote") { "Only remote MCP servers are supported" }
+            require(isSafeMcpEndpoint(server.url)) { "MCP URL must use HTTPS, or HTTP only for localhost" }
+            require(server.timeout in 1_000L..60_000L) { "MCP timeout is out of range" }
+            require(server.headers.size <= 32) { "Too many MCP headers" }
+            server.headers.forEach { (key, value) ->
+                require(key.matches(HEADER_NAME) && value.length <= 8_192 && '\r' !in value && '\n' !in value) { "Invalid MCP header" }
+            }
+        }
+        require(config.serialize().toByteArray().size <= MAX_MCP_CONFIG_BYTES) { "MCP configuration is too large" }
+        return config
     }
 
     private fun skillRoots(projectDir: File?): List<SkillRoot> = skillRootCandidates(projectDir).mapNotNull { root ->
@@ -339,6 +507,22 @@ class McpSkillRepository(private val configDir: File) {
     @Serializable
     private data class SkillState(val disabled: Set<String> = emptySet())
 
+    @Serializable
+    private data class StoredMcpHeaders(val values: Map<String, String>)
+
+    @Serializable
+    private data class StoredMcpConfig(
+        val mcp: Map<String, McpServerConfig> = emptyMap(),
+        @SerialName("_phonecodeMcpSecrets") val secretState: McpSecretState? = null,
+    )
+
+    @Serializable
+    private data class McpSecretState(
+        val names: Set<String> = emptySet(),
+        val revision: String = "",
+        val version: Int = 1,
+    )
+
     private data class SkillRoot(val file: File, val scope: SkillScope)
 
     private companion object {
@@ -346,6 +530,10 @@ class McpSkillRepository(private val configDir: File) {
         const val MAX_SKILL_RESOURCE_BYTES = 512L * 1024L
         const val MAX_FINGERPRINT_BYTES = 1024L * 1024L
         const val MAX_MCP_CONFIG_BYTES = 1024L * 1024L
+        const val MAX_MCP_SERVERS = 20
+        const val MCP_SECRET_STATE_VERSION = 2
         val SKILL_NAME = Regex("^[a-z0-9]+(?:-[a-z0-9]+)*$")
+        val MCP_NAME = Regex("^[a-zA-Z0-9][a-zA-Z0-9 ._-]*$")
+        val HEADER_NAME = Regex("^[!#$%&'*+.^_`|~0-9A-Za-z-]+$")
     }
 }

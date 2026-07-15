@@ -47,12 +47,14 @@ class AndroidSharedFileAccess(
     }
 
     fun unlink(id: String): List<SharedFolder> {
-        store.list().firstOrNull { it.id == id }?.let { folder ->
+        val folder = store.list().firstOrNull { it.id == id }
+        val folders = store.remove(id)
+        folder?.let {
             val flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or
-                if (folder.writable) Intent.FLAG_GRANT_WRITE_URI_PERMISSION else 0
-            runCatching { resolver.releasePersistableUriPermission(Uri.parse(folder.handle), flags) }
+                if (it.writable) Intent.FLAG_GRANT_WRITE_URI_PERMISSION else 0
+            runCatching { resolver.releasePersistableUriPermission(Uri.parse(it.handle), flags) }
         }
-        return store.remove(id)
+        return folders
     }
 
     override suspend fun list(rootId: String, path: String): List<SharedEntry> = withContext(Dispatchers.IO) {

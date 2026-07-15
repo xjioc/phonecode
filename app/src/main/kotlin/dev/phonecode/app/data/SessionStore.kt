@@ -3,6 +3,7 @@ package dev.phonecode.app.data
 import dev.phonecode.provider.domain.ChatMessage
 import dev.phonecode.provider.domain.MessagePart
 import dev.phonecode.provider.domain.Role
+import dev.phonecode.tools.todo.TodoItem
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import java.io.File
@@ -38,6 +39,8 @@ data class PersistedSession(
     val pinned: Boolean = false,
     val archived: Boolean = false,
     val activeTurn: Boolean = false,
+    val todos: List<TodoItem> = emptyList(),
+    val branchInitialized: Boolean = false,
 )
 
 /** Lightweight catalog row for the sessions list (one-line preview, no full message bodies). */
@@ -49,6 +52,7 @@ data class SessionMeta(
     val preview: String = "",
     val pinned: Boolean = false,
     val archived: Boolean = false,
+    val branchInitialized: Boolean = false,
 )
 
 /** Collapse basic markdown to plain text so drawer previews read clean (no **, *, `, #, >, lists, links). */
@@ -94,6 +98,7 @@ private fun PersistedPart.toDomain(): MessagePart = when (this) {
 
 class SessionStore(private val dir: File) {
     private val json = storeJson
+    private val writeOrders = mutableMapOf<String, Long>()
 
     // In-memory catalog (id -> meta) so the hot list() - rebuilt after every turn and every mutation -
     // never re-parses every session file's full message bodies. Authoritative for this process; the
@@ -108,17 +113,22 @@ class SessionStore(private val dir: File) {
 
     private inline fun <T> locked(block: () -> T): T = synchronized(LOCK, block)
 
-    // Filenames are derived from a sanitized id; the app generates collision-free ids (e.g. "session-<epochMs>").
-    private fun fileFor(id: String): File = File(dir, id.replace(UNSAFE, "_") + ".json")
+    private fun fileFor(id: String): File {
+        require(SAFE_ID.matches(id)) { "Invalid session id" }
+        return File(dir, "$id.json")
+    }
+
+    private fun deletionKey(id: String): String = fileFor(id).absolutePath
 
     private fun metaOf(s: PersistedSession): SessionMeta =
-        SessionMeta(s.id, s.title, s.updatedAt, s.projectId, previewOf(s), s.pinned, s.archived)
+        SessionMeta(s.id, s.title, s.updatedAt, s.projectId, previewOf(s), s.pinned, s.archived, s.branchInitialized)
 
     /** Lazily scan the dir once into [metaCache] (the only full-parse pass); later calls reuse it. */
     private fun cache(): MutableMap<String, SessionMeta> = metaCache ?: run {
         val map = LinkedHashMap<String, SessionMeta>()
         (dir.listFiles { f -> f.isFile && f.extension == "json" } ?: emptyArray()).forEach { file ->
             runCatching { json.decodeFromString(PersistedSession.serializer(), file.readText()) }.getOrNull()
+                ?.takeIf { SAFE_ID.matches(it.id) && file.nameWithoutExtension == it.id }
                 ?.let { map[it.id] = metaOf(it) }
         }
         metaCache = map
@@ -126,19 +136,58 @@ class SessionStore(private val dir: File) {
     }
 
     fun save(session: PersistedSession): Unit = locked {
+        require(SAFE_ID.matches(session.id)) { "Invalid session id" }
         dir.mkdirs()
         fileFor(session.id).writeTextAtomically(json.encodeToString(PersistedSession.serializer(), session))
         cache()[session.id] = metaOf(session)
+        deletionTombstones.remove(deletionKey(session.id))
+    }
+
+    fun checkpoint(session: PersistedSession, writeOrder: Long? = null): PersistedSession = locked {
+        if (!acceptsWrite(session.id, writeOrder)) return@locked load(session.id) ?: session
+        val current = cache()[session.id]
+        val updated = current?.let {
+            session.copy(
+                title = it.title.takeUnless { title -> title == "New chat" } ?: session.title,
+                projectId = it.projectId,
+                pinned = it.pinned,
+                archived = it.archived,
+                branchInitialized = it.branchInitialized,
+            )
+        } ?: session
+        save(updated)
+        updated
+    }
+
+    fun create(session: PersistedSession): Boolean = locked {
+        if (fileFor(session.id).exists()) return@locked false
+        save(session)
+        true
     }
 
     fun load(id: String): PersistedSession? = locked {
+        if (!SAFE_ID.matches(id)) return@locked null
         fileFor(id).takeIf { it.exists() }?.let { file ->
             runCatching { json.decodeFromString(PersistedSession.serializer(), file.readText()) }.getOrNull()
+                ?.takeIf { it.id == id }
         }
     }
 
     /** All sessions, newest first, served from the in-memory catalog (no per-call file parse). */
     fun list(): List<SessionMeta> = locked { cache().values.sortedByDescending { it.updatedAt } }
+
+    fun invalidateCatalog(): Unit = locked { metaCache = null }
+
+    fun <T> reconcileExternalRestore(writeOrderBoundary: Long, restore: () -> T): T = locked {
+        val result = restore()
+        metaCache = null
+        cache().keys.forEach { id ->
+            val key = deletionKey(id)
+            deletionTombstones.remove(key)
+            externalRestoreWriteFloors[key] = maxOf(externalRestoreWriteFloors[key] ?: Long.MIN_VALUE, writeOrderBoundary)
+        }
+        result
+    }
 
     /**
      * The most recently updated session, or null. Reads a single file (the newest by mtime), so it is
@@ -147,13 +196,24 @@ class SessionStore(private val dir: File) {
      */
     fun loadLatest(): PersistedSession? = locked {
         (dir.listFiles { f -> f.isFile && f.extension == "json" } ?: emptyArray())
-            .maxByOrNull { it.lastModified() }
-            ?.let { runCatching { json.decodeFromString(PersistedSession.serializer(), it.readText()) }.getOrNull() }
+            .sortedByDescending { it.lastModified() }
+            .asSequence()
+            .mapNotNull { file ->
+                runCatching { json.decodeFromString(PersistedSession.serializer(), file.readText()) }.getOrNull()
+                    ?.takeIf { it.id == file.nameWithoutExtension }
+            }
+            .firstOrNull { SAFE_ID.matches(it.id) }
     }
 
     fun delete(id: String): Unit = locked {
+        if (!SAFE_ID.matches(id)) return@locked
         fileFor(id).delete()
         cache().remove(id)
+        writeOrders.remove(id)
+        deletionTombstones += deletionKey(id)
+        while (deletionTombstones.size > MAX_DELETION_TOMBSTONES) {
+            deletionTombstones.remove(deletionTombstones.first())
+        }
     }
 
     /** Rename a stored session in place (no-op if it doesn't exist). */
@@ -176,12 +236,33 @@ class SessionStore(private val dir: File) {
         load(id)?.let { save(it.copy(archived = archived)) }
     }
 
-    fun setActiveTurn(id: String, active: Boolean): Unit = locked {
+    fun setActiveTurn(id: String, active: Boolean, writeOrder: Long? = null): Unit = locked {
+        if (!acceptsWrite(id, writeOrder)) return@locked
         load(id)?.let { save(it.copy(activeTurn = active)) }
     }
 
+    fun setBranchInitialized(id: String): Unit = locked {
+        load(id)?.let { save(it.copy(branchInitialized = true)) }
+    }
+
+    private fun acceptsWrite(id: String, writeOrder: Long?): Boolean {
+        if (!SAFE_ID.matches(id)) return false
+        val key = deletionKey(id)
+        if (key in deletionTombstones) return false
+        externalRestoreWriteFloors[key]?.let { floor ->
+            if (writeOrder == null || writeOrder <= floor) return false
+        }
+        if (writeOrder == null) return true
+        if (writeOrder < (writeOrders[id] ?: Long.MIN_VALUE)) return false
+        writeOrders[id] = writeOrder
+        return true
+    }
+
     private companion object {
-        val UNSAFE = Regex("[^a-zA-Z0-9_-]")
+        val SAFE_ID = Regex("[A-Za-z0-9][A-Za-z0-9_-]{0,127}")
         val LOCK = Any()
+        val deletionTombstones = LinkedHashSet<String>()
+        val externalRestoreWriteFloors = mutableMapOf<String, Long>()
+        const val MAX_DELETION_TOMBSTONES = 1_024
     }
 }

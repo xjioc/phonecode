@@ -5,14 +5,23 @@ import android.content.SharedPreferences
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 
-class SecureKeyStore(context: Context) {
+interface SecretValueStore {
+    val available: Boolean
+    fun get(name: String): String?
+    fun put(name: String, value: String)
+}
+
+class SecureKeyStore(context: Context) : SecretValueStore {
     private val prefs = createPrefs(context)
-    val secureStorageUnavailable = prefs == null
+    override val available = prefs != null
+    val secureStorageUnavailable = !available
 
-    fun get(providerId: String): String? = prefs?.getString(providerId, null)
+    override fun get(name: String): String? = prefs?.getString(name, null)
 
-    fun put(providerId: String, key: String) {
-        prefs?.edit()?.apply { if (key.isBlank()) remove(providerId) else putString(providerId, key) }?.apply()
+    override fun put(name: String, value: String) {
+        val editor = prefs?.edit() ?: return
+        if (value.isBlank()) editor.remove(name) else editor.putString(name, value)
+        check(editor.commit()) { "Secure storage update failed" }
     }
 
     private companion object {
@@ -22,14 +31,8 @@ class SecureKeyStore(context: Context) {
             val masterKey = MasterKey.Builder(context)
                 .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
                 .build()
-            try {
-                build(context, masterKey)
-            } catch (e: Exception) {
-                context.deleteSharedPreferences(FILE)
-                build(context, masterKey)
-            }
+            build(context, masterKey)
         } catch (e: Exception) {
-            context.deleteSharedPreferences(FILE + "_plain")
             null
         }
 

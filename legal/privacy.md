@@ -1,6 +1,6 @@
 # PhoneCode Privacy Policy
 
-_Last updated: 13 July 2026_
+_Last updated: 15 July 2026_
 
 This Privacy Policy explains how PhoneCode handles data. PhoneCode is an on-device AI coding client published by Deyan Todorov. The developer does not operate a general-purpose PhoneCode backend. A narrowly scoped reporting endpoint receives AI-output reports that you deliberately submit in the app.
 
@@ -9,10 +9,10 @@ This Privacy Policy explains how PhoneCode handles data. PhoneCode is an on-devi
 PhoneCode stores the following locally so the app can work:
 
 - API keys, Git credentials, and third-party sign-in tokens, encrypted with the Android Keystore. If secure storage is unavailable, PhoneCode does not save credentials.
-- Projects, workspace files, linked-folder references, chat history, provider configuration, and app settings.
+- Projects, workspace files, linked-folder references, chat history, todo lists, skills, MCP configuration, provider configuration, and app settings.
 - A bundled Alpine Linux environment and packages installed by you or the agent.
 
-Android cloud backup is disabled for PhoneCode. You can create a manual export of supported chats and settings. Manual exports are not encrypted, so store and share them carefully. They do not contain API keys or sign-in credentials.
+Android cloud backup is disabled for PhoneCode. You can create a manual export of supported chats and settings. Manual exports are not encrypted, so store and share them carefully. PhoneCode does not intentionally include saved provider or sign-in credentials, but exports may contain sensitive content from chats and tool activity.
 
 ## 2. Files and photos you choose
 
@@ -32,7 +32,7 @@ These transfers are optional and initiated by features you choose. Do not send c
 
 Depending on the features you use, PhoneCode may connect directly to:
 
-- Git hosts to clone, fetch, pull, or push repositories.
+- Git hosts to fetch, pull, or push repositories.
 - DuckDuckGo or a model provider's search service for searches requested by you or the agent.
 - models.dev to refresh public provider and model metadata. Prompts and workspace files are not included in this request.
 - Alpine Linux repositories and package sources used by `apk`, `pip`, `npm`, or other tools when you or the agent installs software.
@@ -51,11 +51,11 @@ To limit abuse, the reporting endpoint converts the connecting IP address into a
 
 ## 6. Security
 
-Credentials are stored using Android Keystore-backed encryption and are excluded from manual exports. Network connections use HTTPS where supported by the service. Custom endpoints and software installed in the local development environment are under your control and may have different security properties. PRoot provides Linux compatibility, not a VM or security sandbox. Installed software can access the workspace and runtime directories mounted into that environment and can use PhoneCode's network access. No security measure is perfect; protect your device and revoke provider credentials if you believe they were exposed.
+Provider API keys, Git credentials, third-party sign-in tokens, and custom MCP header values are stored using Android Keystore-backed encryption and are excluded from manual exports. The MCP configuration file retains server URLs, header names, and non-secret connection settings without the header values. Network connections use HTTPS for built-in remote services. Custom endpoints and software installed in the local development environment are under your control and may have different security properties. PRoot provides Linux compatibility, not a VM or security sandbox. Installed software can access the workspace and runtime directories mounted into that environment and can use PhoneCode's network access. No security measure is perfect; protect your device and revoke credentials if you believe they were exposed.
 
 ## 7. Retention and deletion
 
-Local data remains until you delete it in PhoneCode, clear the app's storage, or uninstall the app. Unlinking a folder removes PhoneCode's saved access but does not delete that folder. Uninstalling PhoneCode does not delete remote repositories, provider records, third-party accounts, or a report you already submitted.
+Local data remains until you delete it in PhoneCode, clear the app's storage, or uninstall the app. Deleting or unlinking a project moves its private workspace files into the Unsorted workspace under Recovered projects so they are not lost. Unlinking a folder removes PhoneCode's saved access but does not delete that phone folder. Uninstalling PhoneCode does not delete remote repositories, provider records, third-party accounts, or a report you already submitted.
 
 A successful report displays a reference you can include in an early-deletion or other privacy request to the developer.
 

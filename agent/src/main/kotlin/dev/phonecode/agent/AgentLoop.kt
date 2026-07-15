@@ -3,6 +3,7 @@ package dev.phonecode.agent
 import dev.phonecode.agent.prompt.PromptAssembler
 import dev.phonecode.provider.domain.ChatMessage
 import dev.phonecode.provider.domain.ChatRequest
+import dev.phonecode.provider.domain.FailureKind
 import dev.phonecode.provider.domain.LlmProvider
 import dev.phonecode.provider.domain.MessagePart
 import dev.phonecode.provider.domain.Role
@@ -84,10 +85,30 @@ class AgentLoop(
                 val stepTools = toolProvider().snapshot()
                 val activeTools = visibleTools(mode, stepTools)
                 val toolDefs = activeTools.map { ToolDef(it.name, it.description, it.parameters) }
+                val lastStep = step >= config.maxSteps
+                val requestTools = if (lastStep) emptyList() else toolDefs
+                val system = PromptAssembler.assemble(
+                    config.copy(mcpInstructions = mcpInstructionsProvider()),
+                    settings.model,
+                    activeTools,
+                    mode,
+                )
+                if (contextManager.isOverflow(contextManager.estimatedFixedSize(system, requestTools), settings.contextLimit)) {
+                    emit(AgentEvent.Error("system prompt and enabled tool definitions exceed this model's context window"))
+                    return@flow
+                }
                 // A fresh AgentLoop starts at lastUsageTotal=0, so seed from a size estimate of the
                 // accumulated history; otherwise compaction never fires on the first turn and an
                 // oversized restored session is sent at full size (context-length-exceeded).
-                val seenTokens = maxOf(lastUsageTotal, contextManager.estimatedSize(messages))
+                fun requestMessages(): List<ChatMessage> = if (lastStep) {
+                    messages + ChatMessage(Role.USER, listOf(MessagePart.Text(MAX_STEPS_REMINDER)))
+                } else {
+                    messages
+                }
+                val seenTokens = maxOf(
+                    lastUsageTotal,
+                    contextManager.estimatedRequestSize(system, requestMessages(), requestTools),
+                )
                 if (contextManager.isOverflow(seenTokens, settings.contextLimit)) {
                     val before = messages.size
                     val compacted = contextManager.compact(settings.model, messages.toList())
@@ -95,30 +116,26 @@ class AgentLoop(
                         messages.clear()
                         messages.addAll(compacted)
                         lastUsageTotal = 0L
-                        emit(AgentEvent.Compacted(messages.size))
+                        if (contextManager.isOverflow(
+                                contextManager.estimatedRequestSize(system, requestMessages(), requestTools),
+                                settings.contextLimit,
+                            )
+                        ) {
+                            emit(AgentEvent.Error("context window remains too large after compaction"))
+                            return@flow
+                        }
                     } else {
                         // Could not reduce the context - surface it instead of silently re-sending an oversized request.
                         emit(AgentEvent.Error("context window exceeded and could not be compacted"))
                         return@flow
                     }
                 }
-                val lastStep = step >= config.maxSteps
-                val system = PromptAssembler.assemble(
-                    config.copy(mcpInstructions = mcpInstructionsProvider()),
-                    settings.model,
-                    activeTools,
-                    mode,
-                )
-                val wire = if (lastStep) {
-                    messages + ChatMessage(Role.USER, listOf(MessagePart.Text(MAX_STEPS_REMINDER)))
-                } else {
-                    messages.toList()
-                }
+                val wire = requestMessages()
                 val request = ChatRequest(
                     model = settings.model,
                     system = system,
                     messages = wire,
-                    tools = if (lastStep) emptyList() else toolDefs,
+                    tools = requestTools,
                     reasoningEffort = settings.reasoningEffort,
                     maxTokens = settings.maxOutput?.toInt(),
                     sessionId = config.sessionId,
@@ -130,39 +147,57 @@ class AgentLoop(
                 var failure: StreamEvent.Failed? = null
                 var emittedContent = false
                 var attempt = 0
+                var streamedChars = 0L
+
+                fun reserveStreamChars(length: Int) {
+                    if (streamedChars + length > MAX_STREAMED_TURN_CHARS) throw StreamLimitExceeded()
+                    streamedChars += length
+                }
 
                 while (true) {
                     failure = null
-                    provider.stream(request).collect { event ->
-                        when (event) {
-                            is StreamEvent.TextDelta -> {
-                                emittedContent = true
-                                text.append(event.text)
-                                emit(AgentEvent.TextDelta(event.text))
+                    try {
+                        provider.stream(request).collect { event ->
+                            when (event) {
+                                is StreamEvent.TextDelta -> {
+                                    reserveStreamChars(event.text.length)
+                                    emittedContent = true
+                                    text.append(event.text)
+                                    emit(AgentEvent.TextDelta(event.text))
+                                }
+                                is StreamEvent.ReasoningDelta -> {
+                                    reserveStreamChars(event.text.length)
+                                    emittedContent = true
+                                    reasoning.append(event.text)
+                                    emit(AgentEvent.ReasoningDelta(event.text))
+                                }
+                                is StreamEvent.ToolCallStart -> {
+                                    reserveStreamChars(event.id.length)
+                                    reserveStreamChars(event.name.length)
+                                    if (!toolCalls.containsKey(event.index) && toolCalls.size >= MAX_TOOL_CALLS_PER_TURN) {
+                                        throw StreamLimitExceeded()
+                                    }
+                                    emittedContent = true
+                                    toolCalls[event.index] = ToolCallAccumulator(event.id.ifBlank { "call_${event.index}" }, event.name)
+                                }
+                                is StreamEvent.ToolCallArgsDelta -> {
+                                    reserveStreamChars(event.jsonFragment.length)
+                                    emittedContent = true
+                                    toolCalls[event.index]?.args?.append(event.jsonFragment)
+                                }
+                                is StreamEvent.ToolCallEnd -> emittedContent = true
+                                is StreamEvent.Usage -> {
+                                    emittedContent = true
+                                    lastUsageTotal = event.input + event.output +
+                                        (event.cacheRead ?: 0) + (event.cacheWrite ?: 0) + (event.reasoning ?: 0)
+                                    emit(AgentEvent.Usage(event.input, event.output))
+                                }
+                                is StreamEvent.Done -> Unit
+                                is StreamEvent.Failed -> failure = event
                             }
-                            is StreamEvent.ReasoningDelta -> {
-                                emittedContent = true
-                                reasoning.append(event.text)
-                                emit(AgentEvent.ReasoningDelta(event.text))
-                            }
-                            is StreamEvent.ToolCallStart -> {
-                                emittedContent = true
-                                toolCalls[event.index] = ToolCallAccumulator(event.id.ifBlank { "call_${event.index}" }, event.name)
-                            }
-                            is StreamEvent.ToolCallArgsDelta -> {
-                                emittedContent = true
-                                toolCalls[event.index]?.args?.append(event.jsonFragment)
-                            }
-                            is StreamEvent.ToolCallEnd -> emittedContent = true
-                            is StreamEvent.Usage -> {
-                                emittedContent = true
-                                lastUsageTotal = event.input + event.output +
-                                    (event.cacheRead ?: 0) + (event.cacheWrite ?: 0) + (event.reasoning ?: 0)
-                                emit(AgentEvent.Usage(event.input, event.output))
-                            }
-                            is StreamEvent.Done -> Unit
-                            is StreamEvent.Failed -> failure = event
                         }
+                    } catch (_: StreamLimitExceeded) {
+                        failure = StreamEvent.Failed(STREAM_LIMIT_MESSAGE, kind = FailureKind.INVALID_REQUEST)
                     }
                     val current = failure ?: break
                     if (!current.retryable || emittedContent || attempt >= MAX_RETRIES) break
@@ -239,7 +274,10 @@ class AgentLoop(
         calls.forEach { emit(AgentEvent.ToolStarted(it.id, it.name, it.args.toString())) }
         // Serialize whenever a tool can prompt for permission (mutating) or opts into sequential,
         // so permission dialogs never race - even if a tool sets sequential=false while mutating.
-        val anySequential = calls.any { val tool = registry.get(it.name); tool?.sequential == true || tool?.mutating == true }
+        val anySequential = calls.any {
+            val tool = registry.get(it.name)
+            tool?.sequential == true || tool?.mutates(parseArgs(it.args.toString())) == true
+        }
         val results = if (anySequential) {
             calls.map { executeOne(it, mode, registry) }
         } else {
@@ -255,15 +293,16 @@ class AgentLoop(
     private suspend fun executeOne(call: ToolCallAccumulator, mode: AgentMode, registry: ToolRegistry): ToolResult {
         val tool = registry.get(call.name)
             ?: return ToolResult("unknown tool: ${call.name}", isError = true)
+        val args = parseArgs(call.args.toString())
         // Defense-in-depth: PLAN must never mutate, even if a tool was somehow requested.
-        if (mode == AgentMode.PLAN && tool.mutating) {
+        if (mode == AgentMode.PLAN && tool.mutates(args)) {
             return ToolResult("blocked: ${tool.name} mutates state and is not allowed in PLAN mode", isError = true)
         }
-        if (tool.mutating && !context.requestPermission(tool.name, summarize(call))) {
+        if (tool.mutates(args) && !context.requestPermission(tool.name, summarize(call))) {
             return ToolResult("permission denied by user for ${tool.name}", isError = true)
         }
         return try {
-            tool.execute(parseArgs(call.args.toString()), context)
+            tool.execute(args, context).limitOutput()
         } catch (cancel: CancellationException) {
             throw cancel // never swallow cooperative cancellation
         } catch (t: Throwable) {
@@ -301,7 +340,21 @@ class AgentLoop(
             runCatching { argsJson.parseToJsonElement(json).jsonObject }.getOrDefault(JsonObject(emptyMap()))
         }
 
-    private fun summarize(call: ToolCallAccumulator): String = "${call.name}(${call.args.toString().take(200)})"
+    private fun summarize(call: ToolCallAccumulator): String {
+        val raw = call.args.toString()
+        val visible = if (raw.length <= MAX_PERMISSION_SUMMARY_CHARS) {
+            raw
+        } else {
+            raw.take(MAX_PERMISSION_SUMMARY_CHARS / 2) + "\n…\n" + raw.takeLast(MAX_PERMISSION_SUMMARY_CHARS / 2)
+        }
+        return "${call.name}\n$visible"
+    }
+
+    private fun ToolResult.limitOutput(): ToolResult = if (output.length <= MAX_TOOL_OUTPUT_CHARS) {
+        this
+    } else {
+        copy(output = output.take(MAX_TOOL_OUTPUT_CHARS) + "\n[Tool output truncated by PhoneCode. Request a narrower result.]")
+    }
 
     // A queued/steering message is folded in as a plain user turn (no wrapper), so the persisted history
     // and the on-screen timeline match exactly; the model treats it as the user's next input.
@@ -312,11 +365,19 @@ class AgentLoop(
         val args = StringBuilder()
     }
 
+    private class StreamLimitExceeded : RuntimeException()
+
     private companion object {
         const val DOOM_LOOP_THRESHOLD = 3
         const val MAX_RETRIES = 5
+        const val MAX_STREAMED_TURN_CHARS = 2_000_000L
+        const val MAX_TOOL_CALLS_PER_TURN = 128
+        const val MAX_TOOL_OUTPUT_CHARS = 64_000
+        const val MAX_PERMISSION_SUMMARY_CHARS = 600
+        const val STREAM_LIMIT_MESSAGE =
+            "Provider response exceeded PhoneCode's per-turn stream safety limit. Try again or switch models."
         const val MAX_STEPS_REMINDER =
-            "<system-reminder>Maximum steps reached. Tools are disabled. Respond with text only to summarize and wrap up.</system-reminder>"
+            "PhoneCode has ended tool access for this turn. Respond with text only to summarize the result and remaining work."
     }
 }
 

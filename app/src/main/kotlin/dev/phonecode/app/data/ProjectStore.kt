@@ -36,6 +36,8 @@ class ProjectStore(private val file: File) {
 
     fun delete(id: String): Unit = locked { save(list().filterNot { it.id == id }) }
 
+    fun replace(projects: List<Project>): Unit = locked { save(projects) }
+
     private companion object {
         val LOCK = Any()
     }

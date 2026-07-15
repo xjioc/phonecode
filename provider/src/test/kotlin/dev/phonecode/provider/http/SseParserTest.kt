@@ -1,6 +1,7 @@
 package dev.phonecode.provider.http
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertThrows
 import org.junit.Test
 
 class SseParserTest {
@@ -31,5 +32,12 @@ class SseParserTest {
 
     @Test fun normalizesCarriageReturns() {
         assertEquals(listOf(RawSse(null, "x")), SseParser.parseAll("data: x\r\n\r\n"))
+    }
+
+    @Test fun rejectsOversizedMultilineEvents() {
+        val parser = SseParser(maxEventChars = 8)
+        parser.line("data: 1234")
+
+        assertThrows(SseLimitException::class.java) { parser.line("data: 5678") }
     }
 }

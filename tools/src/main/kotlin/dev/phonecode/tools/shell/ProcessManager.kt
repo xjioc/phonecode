@@ -71,6 +71,7 @@ class ProcessManager(
         val exitCode = AtomicInteger(exitCode ?: EXIT_UNKNOWN)
         val finishedAt = AtomicLong(finishedAt ?: TIME_UNKNOWN)
         val released = AtomicBoolean(released)
+        val liveSlotReleased = AtomicBoolean(released)
         val stopRequested = AtomicBoolean(state == State.STOPPED)
     }
 
@@ -135,8 +136,10 @@ class ProcessManager(
     }
 
     private val sequence = AtomicInteger()
+    private val liveProcesses = AtomicInteger()
     private val sessions = ConcurrentHashMap<String, Session>()
     private val store = Store(storageDirectory)
+    private val lifecycleLock = Any()
 
     init {
         var interrupted = false
@@ -163,73 +166,90 @@ class ProcessManager(
     }
 
     suspend fun start(command: String, workspacePath: String): ToolResult = withContext(Dispatchers.IO) {
-        val commandEnvironment = environmentProvider()
-        val process = runCatching {
-            ProcessBuilder(shellProvider(workspacePath) + command)
-                .directory(if ("PROOT_LOADER" in commandEnvironment) File("/") else File(workspacePath))
-                .redirectErrorStream(true)
-                .apply { environment().putAll(commandEnvironment) }
-                .start()
-        }.getOrElse { return@withContext ToolResult("background process failed: ${it.message}", true) }
-        val id = "proc-${sequence.incrementAndGet()}"
-        val session = Session(
-            id = id,
-            command = command,
-            workspacePath = workspacePath,
-            startedAt = System.currentTimeMillis(),
-            process = process,
-            output = LogBuffer(),
-            state = State.RUNNING,
-            exitCode = null,
-            finishedAt = null,
-            released = false,
-        )
-        sessions[id] = session
-        if (!store.saveLog(id, "") || !persist()) {
-            terminate(process)
-            sessions.remove(id, session)
-            store.deleteLog(id)
-            return@withContext ToolResult("background process failed: process state could not be saved", true)
-        }
-        var leased = false
-        try {
-            onStarted(id)
-            leased = true
-            watch(session)
-        } catch (error: Throwable) {
-            session.stopRequested.set(true)
-            terminate(process)
-            sessions.remove(id, session)
-            store.deleteLog(id)
-            persist()
-            if (leased) runCatching { onStopped(id) }
-            return@withContext ToolResult("background process failed: ${error.message}", true)
+        val (process, session) = synchronized(lifecycleLock) {
+            if (!reserveLiveProcess()) {
+                return@withContext ToolResult(
+                    "background process limit reached ($MAX_LIVE_PROCESSES); stop a running process before starting another",
+                    true,
+                )
+            }
+            val process = runCatching {
+                val commandEnvironment = environmentProvider()
+                ProcessBuilder(shellProvider(workspacePath) + command)
+                    .directory(if ("PROOT_LOADER" in commandEnvironment) File("/") else File(workspacePath))
+                    .redirectErrorStream(true)
+                    .apply { environment().putAll(commandEnvironment) }
+                    .start()
+            }.getOrElse {
+                liveProcesses.decrementAndGet()
+                return@withContext ToolResult("background process failed: ${it.message}", true)
+            }
+            val id = "proc-${sequence.incrementAndGet()}"
+            val session = Session(
+                id = id,
+                command = command,
+                workspacePath = workspacePath,
+                startedAt = System.currentTimeMillis(),
+                process = process,
+                output = LogBuffer(),
+                state = State.RUNNING,
+                exitCode = null,
+                finishedAt = null,
+                released = false,
+            )
+            sessions[id] = session
+            if (!store.saveLog(id, "") || !persist()) {
+                terminateProcessTree(process)
+                sessions.remove(id, session)
+                store.deleteLog(id)
+                releaseLiveProcess(session)
+                return@withContext ToolResult("background process failed: process state could not be saved", true)
+            }
+            var leased = false
+            try {
+                onStarted(id)
+                leased = true
+                watch(session)
+            } catch (error: Throwable) {
+                session.stopRequested.set(true)
+                terminateProcessTree(process)
+                sessions.remove(id, session)
+                store.deleteLog(id)
+                releaseLiveProcess(session)
+                persist()
+                if (leased) runCatching { onStopped(id) }
+                return@withContext ToolResult("background process failed: ${error.message}", true)
+            }
+            process to session
         }
         prune()
         delay(350)
         if (!process.isAlive) {
-            finish(session, runCatching { process.exitValue() }.getOrDefault(-1))
-            return@withContext ToolResult(render(session), true)
+            val exitCode = runCatching { process.exitValue() }.getOrDefault(-1)
+            finish(session, exitCode)
+            return@withContext ToolResult(render(session), exitCode != 0)
         }
         ToolResult(
-            "Started $id in the background.\nCommand: ${command.take(240)}\n" +
-                "Use process action=output session_id=$id for logs or action=stop to stop it.",
+            "Started ${session.id} in the background.\nCommand: ${command.take(240)}\n" +
+                "Use process action=output session_id=${session.id} for logs or action=stop to stop it.",
         )
     }
 
-    fun list(): ToolResult {
-        val items = sessions.values.sortedBy { it.startedAt }
+    fun list(workspacePath: String? = null): ToolResult {
+        val items = sessions.values.filter { workspacePath == null || it.workspacePath == workspacePath }.sortedBy { it.startedAt }
         if (items.isEmpty()) return ToolResult("No managed background processes.")
         return ToolResult(items.joinToString("\n") { "${it.id} ${status(it)} ${it.command.take(160)}" })
     }
 
-    fun output(id: String): ToolResult {
+    fun output(id: String, workspacePath: String? = null, maxChars: Int = MAX_LOG): ToolResult {
         val session = sessions[id] ?: return ToolResult("Unknown process session: $id", true)
-        return ToolResult(render(session))
+        if (workspacePath != null && session.workspacePath != workspacePath) return ToolResult("Unknown process session: $id", true)
+        return ToolResult(render(session, maxChars.coerceIn(1_000, MAX_LOG)))
     }
 
-    fun input(id: String, data: String, appendNewline: Boolean = true): ToolResult {
+    fun input(id: String, data: String, appendNewline: Boolean = true, workspacePath: String? = null): ToolResult {
         val session = sessions[id] ?: return ToolResult("Unknown process session: $id", true)
+        if (workspacePath != null && session.workspacePath != workspacePath) return ToolResult("Unknown process session: $id", true)
         val process = session.process
         if (process == null || !process.isAlive) return ToolResult("Process session is not running: $id", true)
         return runCatching {
@@ -242,30 +262,37 @@ class ProcessManager(
         }.getOrElse { ToolResult("Unable to send input to $id: ${it.message}", true) }
     }
 
-    suspend fun stop(id: String): ToolResult = withContext(Dispatchers.IO) {
-        val session = sessions[id] ?: return@withContext ToolResult("Unknown process session: $id", true)
-        val process = session.process
-        session.stopRequested.set(true)
-        if (process?.isAlive == true) {
-            process.destroy()
-            if (!process.waitFor(2, TimeUnit.SECONDS)) {
-                process.destroyForcibly()
-                process.waitFor(2, TimeUnit.SECONDS)
+    suspend fun stop(id: String, workspacePath: String? = null): ToolResult = withContext(Dispatchers.IO) {
+        synchronized(lifecycleLock) {
+            val session = sessions[id] ?: return@withContext ToolResult("Unknown process session: $id", true)
+            if (workspacePath != null && session.workspacePath != workspacePath) {
+                return@withContext ToolResult("Unknown process session: $id", true)
             }
+            stopSession(session)
         }
-        finish(session, process?.let { runCatching { it.exitValue() }.getOrDefault(-1) } ?: session.exitCode.get())
-        ToolResult("Stopped $id.\n${session.output.read().ifBlank { "(no output)" }}")
     }
 
-    fun stopAll() {
-        sessions.values.filter { it.state.get() == State.RUNNING }.forEach { session ->
-            session.stopRequested.set(true)
-            session.process?.let { process ->
-                runCatching { process.destroy() }
-                if (process.isAlive) runCatching { process.destroyForcibly() }
-            }
-            finish(session, session.process?.let { runCatching { it.exitValue() }.getOrDefault(-1) } ?: -1)
+    suspend fun stopWorkspace(workspacePath: String) = withContext(Dispatchers.IO) {
+        synchronized(lifecycleLock) {
+            val key = workspaceKey(workspacePath)
+            sessions.values
+                .filter { it.state.get() == State.RUNNING && workspaceKey(it.workspacePath) == key }
+                .forEach(::stopSession)
         }
+    }
+
+    fun stopAll() = synchronized(lifecycleLock) {
+        sessions.values.filter { it.state.get() == State.RUNNING }.forEach(::stopSession)
+    }
+
+    private fun stopSession(session: Session): ToolResult {
+        val process = session.process
+        session.stopRequested.set(true)
+        process?.let(::terminateProcessTree)
+        finish(session, process?.let { runCatching { it.exitValue() }.getOrDefault(-1) } ?: session.exitCode.get())
+        return ToolResult(
+            "Stopped ${session.id}.\n${session.output.read().takeLast(12_000).ifBlank { "(no output)" }}",
+        )
     }
 
     private fun watch(session: Session) {
@@ -298,11 +325,12 @@ class ProcessManager(
             store.saveLog(session.id, session.output.read())
             persist()
         }
+        releaseLiveProcess(session)
         if (session.released.compareAndSet(false, true)) runCatching { onStopped(session.id) }
     }
 
-    private fun render(session: Session): String =
-        "${session.id} ${status(session)}\nCommand: ${session.command}\n${session.output.read().ifBlank { "(no output yet)" }}"
+    private fun render(session: Session, maxChars: Int = MAX_LOG): String =
+        "${session.id} ${status(session)}\nCommand: ${session.command}\n${session.output.read().takeLast(maxChars).ifBlank { "(no output yet)" }}"
 
     private fun status(session: Session): String = when {
         session.process?.isAlive == true && session.state.get() == State.RUNNING -> "running"
@@ -315,13 +343,20 @@ class ProcessManager(
 
     private fun persist(): Boolean = store.save(sessions.values)
 
-    private fun terminate(process: Process) {
-        runCatching { process.destroy() }
-        if (!runCatching { process.waitFor(2, TimeUnit.SECONDS) }.getOrDefault(false)) {
-            runCatching { process.destroyForcibly() }
-            runCatching { process.waitFor(2, TimeUnit.SECONDS) }
+    private fun reserveLiveProcess(): Boolean {
+        while (true) {
+            val current = liveProcesses.get()
+            if (current >= MAX_LIVE_PROCESSES) return false
+            if (liveProcesses.compareAndSet(current, current + 1)) return true
         }
     }
+
+    private fun releaseLiveProcess(session: Session) {
+        if (session.liveSlotReleased.compareAndSet(false, true)) liveProcesses.decrementAndGet()
+    }
+
+    private fun workspaceKey(path: String): String =
+        runCatching { File(path).canonicalPath }.getOrElse { File(path).absoluteFile.normalize().path }
 
     private fun prune() {
         if (sessions.size <= MAX_SESSIONS) return
@@ -339,8 +374,37 @@ class ProcessManager(
     private companion object {
         const val MAX_LOG = 48_000
         const val MAX_SESSIONS = 24
+        const val MAX_LIVE_PROCESSES = 4
         const val EXIT_UNKNOWN = Int.MIN_VALUE
         const val TIME_UNKNOWN = Long.MIN_VALUE
         const val LOG_SAVE_INTERVAL_NANOS = 1_000_000_000L
+    }
+}
+
+internal fun terminateProcessTree(process: Process) {
+    val descendants = runCatching {
+        process.descendants().use { stream ->
+            buildList { stream.iterator().forEachRemaining(::add) }
+        }
+    }.getOrDefault(emptyList())
+    runCatching { process.outputStream.close() }
+    runCatching { process.destroy() }
+    descendants.asReversed().forEach { runCatching { it.destroy() } }
+    waitForExit(process, descendants)
+    descendants.asReversed().filter { runCatching { it.isAlive }.getOrDefault(false) }
+        .forEach { runCatching { it.destroyForcibly() } }
+    if (runCatching { process.isAlive }.getOrDefault(false)) runCatching { process.destroyForcibly() }
+    waitForExit(process, descendants)
+    runCatching { process.inputStream.close() }
+    runCatching { process.errorStream.close() }
+}
+
+private fun waitForExit(process: Process, descendants: List<ProcessHandle>) {
+    val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2)
+    while (System.nanoTime() < deadline) {
+        val alive = runCatching { process.isAlive }.getOrDefault(false) ||
+            descendants.any { runCatching { it.isAlive }.getOrDefault(false) }
+        if (!alive) return
+        runCatching { Thread.sleep(20) }.onFailure { return }
     }
 }

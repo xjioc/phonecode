@@ -1,6 +1,7 @@
 package dev.phonecode.app.ui
 
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
@@ -9,6 +10,8 @@ import androidx.compose.ui.test.onLast
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performTextReplacement
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import dev.phonecode.app.MainActivity
 import dev.phonecode.app.PhoneCodeApplication
@@ -28,12 +31,24 @@ import org.robolectric.annotation.GraphicsMode
 @Config(sdk = [34], qualifiers = "w412dp-h915dp-xhdpi")
 class UiSmokeTest {
 
+    private val skillFixture = """---
+name: hot-skill
+description: Hot reload fixture
+---
+
+Original instruction.
+"""
+
     /** First-run onboarding would otherwise cover the app for every test. */
     private val seedSettings = object : org.junit.rules.ExternalResource() {
         override fun before() {
             val filesDir = androidx.test.core.app.ApplicationProvider
                 .getApplicationContext<android.content.Context>().filesDir
             java.io.File(filesDir, "app_settings.json").writeText("""{"onboarded":true}""")
+            java.io.File(filesDir, "config/skills/hot-skill/SKILL.md").apply {
+                parentFile?.mkdirs()
+                writeText(skillFixture)
+            }
         }
     }
 
@@ -47,7 +62,7 @@ class UiSmokeTest {
     private fun dismissOnboardingIfPresent() {
         if (compose.onAllNodesWithText("Get started").fetchSemanticsNodes().isEmpty()) return
         compose.onNodeWithText("Get started").performClick()
-        compose.onNodeWithText("Continue without a project").performClick()
+        compose.onNodeWithText("Skip setup for now").performClick()
         compose.waitForIdle()
     }
 
@@ -58,12 +73,11 @@ class UiSmokeTest {
 
         // Model sheet opens from the composer's model pill (header is always visible; specific
         // model rows may sit below the sheet's scroll fold).
-        compose.onNodeWithText("Claude Opus 4.8").performClick()
+        compose.onNodeWithContentDescription("Switch model").performClick()
         compose.onNodeWithText("Model & reasoning").assertIsDisplayed()
         compose.onNodeWithText("Agent mode").assertIsDisplayed()
         compose.onAllNodesWithText("Build").onLast().assertIsDisplayed()
         compose.onNodeWithText("Plan").assertIsDisplayed()
-        compose.onAllNodesWithText("Claude Opus 4.8").onLast().performClick()
         val done = compose.onAllNodesWithText("Done")
         if (done.fetchSemanticsNodes().isNotEmpty()) done.onFirst().performClick()
         compose.waitForIdle()
@@ -87,6 +101,8 @@ class UiSmokeTest {
         compose.onNodeWithText("MCP").assertIsDisplayed()
         compose.onNodeWithContentDescription("Settings").performClick()
         compose.onNodeWithText("Providers").assertIsDisplayed()
+        compose.onNodeWithContentDescription("Back").performClick()
+        compose.onNodeWithContentDescription("Menu").assertIsDisplayed()
     }
 
     @Test
@@ -102,6 +118,68 @@ class UiSmokeTest {
 
         compose.onNodeWithText("Runtime retained").assertIsDisplayed()
         app.chatViewModel.clearError()
+    }
+
+    @Test
+    fun composerDraftDoesNotCrossSessions() {
+        dismissOnboardingIfPresent()
+        compose.onNodeWithContentDescription("Message").performTextInput("Session one draft")
+        compose.onNodeWithContentDescription("Message").assertTextEquals("Session one draft")
+
+        compose.onNodeWithContentDescription("Menu").performClick()
+        compose.onNodeWithContentDescription("New chat").performClick()
+        compose.waitForIdle()
+
+        compose.onNodeWithContentDescription("Message").assertTextEquals("")
+    }
+
+    @Test
+    fun mcpDraftSurvivesActivityRecreation() {
+        dismissOnboardingIfPresent()
+        compose.onNodeWithContentDescription("Menu").performClick()
+        compose.onNodeWithContentDescription("Settings").performClick()
+        compose.onNodeWithText("MCP servers").performClick()
+        compose.onNodeWithText("Add server").performClick()
+        compose.onNodeWithContentDescription("Server name").performTextInput("draft-server")
+        compose.onNodeWithContentDescription("Remote URL").performTextInput("https://example.com/mcp")
+
+        compose.activityRule.scenario.recreate()
+        compose.waitForIdle()
+
+        compose.onNodeWithContentDescription("Server name").assertTextEquals("draft-server")
+        compose.onNodeWithContentDescription("Remote URL").assertTextEquals("https://example.com/mcp")
+    }
+
+    @Test
+    fun skillDraftSurvivesRecreationAndExternalDelete() {
+        dismissOnboardingIfPresent()
+        compose.onNodeWithContentDescription("Menu").performClick()
+        compose.onNodeWithContentDescription("Settings").performClick()
+        compose.onNodeWithText("Skills").performClick()
+        compose.waitUntil(5_000) { compose.onAllNodesWithText("hot-skill").fetchSemanticsNodes().isNotEmpty() }
+        compose.onAllNodesWithText("hot-skill").onFirst().performClick()
+        compose.onNodeWithText("Edit skill").performClick()
+        compose.waitUntil(5_000) {
+            compose.onAllNodesWithContentDescription("Skill instructions").fetchSemanticsNodes().isNotEmpty()
+        }
+        val draft = skillFixture.replace("Original instruction.", "Unsaved instruction.")
+        compose.onNodeWithContentDescription("Skill instructions").performTextReplacement(draft)
+
+        compose.activityRule.scenario.recreate()
+        compose.waitForIdle()
+        compose.onNodeWithContentDescription("Skill instructions").assertTextEquals(draft)
+
+        val app = androidx.test.core.app.ApplicationProvider.getApplicationContext<PhoneCodeApplication>()
+        val directory = java.io.File(app.filesDir, "config/skills/hot-skill")
+        java.io.File(directory, "SKILL.md").delete()
+        directory.delete()
+        app.chatViewModel.refreshSkills()
+        compose.waitUntil(5_000) {
+            compose.onAllNodesWithText("This skill was removed or renamed", substring = true).fetchSemanticsNodes().isNotEmpty()
+        }
+
+        compose.onNodeWithContentDescription("Skill instructions").assertTextEquals(draft)
+        compose.onNodeWithText("Copy draft").assertIsDisplayed()
     }
 
     @Test

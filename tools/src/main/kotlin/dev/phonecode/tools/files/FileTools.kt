@@ -13,6 +13,7 @@ import java.nio.file.FileVisitResult
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.SimpleFileVisitor
+import java.nio.file.StandardCopyOption
 import java.nio.file.attribute.BasicFileAttributes
 
 /** The native, zero-setup file tools available on any device. */
@@ -20,10 +21,27 @@ fun defaultFileTools(): List<Tool> = listOf(ReadTool(), WriteTool(), EditTool(),
 
 private const val MAX_RESULTS = 200
 private const val MAX_FILE_BYTES = 5_000_000L
+private const val MAX_READ_CHARS = 50_000
 private val json = Json { ignoreUnknownKeys = true; isLenient = true }
 
 private fun resolve(context: ToolContext, path: String): Result<File> =
     runCatching { resolveInWorkspace(context.workspacePath, path) }
+
+private fun File.writeUtf8Atomically(content: String) {
+    val parent = parentFile ?: error("file has no parent directory")
+    parent.mkdirs()
+    val temporary = File.createTempFile(".$name-", ".tmp", parent)
+    try {
+        temporary.writeText(content)
+        runCatching {
+            Files.move(temporary.toPath(), toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
+        }.getOrElse {
+            Files.move(temporary.toPath(), toPath(), StandardCopyOption.REPLACE_EXISTING)
+        }
+    } finally {
+        temporary.delete()
+    }
+}
 
 // Directories glob/grep must never descend into: VCS internals and build output are huge, machine-owned,
 // and never what a search wants. Pruning the whole subtree (not just filtering reads) is the real speedup.
@@ -36,8 +54,11 @@ private fun walkFiles(base: Path, onFile: (Path) -> Boolean) {
             if (dir != base && dir.fileName?.toString() in PRUNED_DIRS) FileVisitResult.SKIP_SUBTREE
             else FileVisitResult.CONTINUE
 
-        override fun visitFile(file: Path, attrs: BasicFileAttributes): FileVisitResult =
-            if (onFile(file)) FileVisitResult.CONTINUE else FileVisitResult.TERMINATE
+        override fun visitFile(file: Path, attrs: BasicFileAttributes): FileVisitResult = when {
+            attrs.isSymbolicLink || !attrs.isRegularFile -> FileVisitResult.CONTINUE
+            onFile(file) -> FileVisitResult.CONTINUE
+            else -> FileVisitResult.TERMINATE
+        }
 
         override fun visitFileFailed(file: Path, exc: IOException): FileVisitResult = FileVisitResult.CONTINUE
     })
@@ -62,21 +83,66 @@ class ReadTool : Tool {
         val file = resolve(context, path).getOrElse { return ToolResult(it.message ?: "read: bad path", true) }
         if (!file.exists()) return ToolResult("read: file not found: $path", true)
         if (file.isDirectory) return ToolResult("read: $path is a directory", true)
-        if (file.length() > MAX_FILE_BYTES) {
-            return ToolResult("read: file too large (${file.length()} bytes); narrow with offset/limit or use grep", true)
-        }
-        val lines = file.readLines()
         val offset = (args.int("offset") ?: 1).coerceAtLeast(1)
         val limit = (args.int("limit") ?: DEFAULT_LIMIT).coerceAtLeast(1)
-        val start = offset - 1
-        if (lines.isNotEmpty() && start >= lines.size) {
-            return ToolResult("read: offset $offset is past end of file (${lines.size} lines)", true)
+        if (file.length() > MAX_FILE_BYTES && args.int("offset") == null && args.int("limit") == null) {
+            return ToolResult("read: file is ${file.length()} bytes; provide offset and limit or use grep", true)
         }
-        val slice = lines.drop(start).take(limit)
-        val body = slice.mapIndexed { i, line -> "${start + i + 1}\t$line" }.joinToString("\n")
-        val end = start + slice.size
-        val more = if (end < lines.size) "\n[Showing lines $offset-$end of ${lines.size}. Use offset=${end + 1} to continue.]" else ""
-        return ToolResult(if (slice.isEmpty()) "(empty file)" else body + more)
+        val body = StringBuilder()
+        var lineNumber = 1
+        var lineCount = 0
+        var shown = 0
+        var more = false
+        var truncatedLine: Int? = null
+        var sawContent = false
+        var lastWasNewline = false
+        var stopped = false
+        file.reader().use { reader ->
+            val buffer = CharArray(8 * 1024)
+            while (!stopped) {
+                val count = reader.read(buffer)
+                if (count < 0) break
+                for (index in 0 until count) {
+                    val character = buffer[index]
+                    sawContent = true
+                    if (lineNumber >= offset && shown < limit && (shown == 0 || lastWasNewline)) {
+                        if (body.isNotEmpty()) body.append('\n')
+                        body.append(lineNumber).append('\t')
+                        shown++
+                    } else if (lineNumber >= offset && shown >= limit && (shown == 0 || lastWasNewline)) {
+                        more = true
+                        stopped = true
+                        break
+                    }
+                    if (character == '\n') {
+                        lineCount = lineNumber
+                        lineNumber++
+                        lastWasNewline = true
+                    } else {
+                        if (character != '\r' && lineNumber >= offset && shown <= limit) {
+                            if (body.length >= MAX_READ_CHARS) {
+                                truncatedLine = lineNumber
+                                more = true
+                                stopped = true
+                                break
+                            }
+                            body.append(character)
+                        }
+                        lastWasNewline = false
+                    }
+                }
+            }
+        }
+        if (sawContent && !lastWasNewline) lineCount = lineNumber
+        if (!sawContent) return ToolResult("(empty file)")
+        if (shown == 0 && lineCount < offset) return ToolResult("read: offset $offset is past end of file ($lineCount lines)", true)
+        if (shown == 0) return ToolResult("(empty file)")
+        if (truncatedLine != null) {
+            body.append("\n[Line $truncatedLine truncated because it exceeds the $MAX_READ_CHARS-character read limit.]")
+        } else if (more) {
+            body.append("\n[Showing lines $offset-${offset + shown - 1}. Use offset=${offset + shown} to continue.]")
+        }
+        return ToolResult(body.toString())
     }
 
     private companion object { const val DEFAULT_LIMIT = 2000 }
@@ -95,12 +161,13 @@ class WriteTool : Tool {
     override suspend fun execute(args: JsonObject, context: ToolContext): ToolResult {
         val path = args.str("path") ?: return ToolResult("write: missing 'path'", true)
         val content = args.str("content") ?: return ToolResult("write: missing 'content'", true)
+        val bytes = content.toByteArray(Charsets.UTF_8).size
+        if (bytes > MAX_FILE_BYTES) return ToolResult("write: content exceeds $MAX_FILE_BYTES bytes", true)
         val file = resolve(context, path).getOrElse { return ToolResult(it.message ?: "write: bad path", true) }
         if (file.isDirectory) return ToolResult("write: $path is a directory", true)
         return runCatching {
-            file.parentFile?.mkdirs()
-            file.writeText(content)
-            ToolResult("wrote ${content.toByteArray(Charsets.UTF_8).size} bytes to $path")
+            file.writeUtf8Atomically(content)
+            ToolResult("wrote $bytes bytes to $path")
         }.getOrElse { ToolResult("write: ${it.message}", true) }
     }
 }
@@ -132,6 +199,7 @@ class EditTool : Tool {
         val path = args.str("path") ?: return ToolResult("edit: missing 'path'", true)
         val file = resolve(context, path).getOrElse { return ToolResult(it.message ?: "edit: bad path", true) }
         if (!file.exists() || file.isDirectory) return ToolResult("edit: file not found: $path", true)
+        if (file.length() > MAX_FILE_BYTES) return ToolResult("edit: file exceeds $MAX_FILE_BYTES bytes", true)
         val edits = parseEdits(args) ?: return ToolResult("edit: missing or invalid 'edits'", true)
         if (edits.isEmpty()) return ToolResult("edit: no edits provided", true)
 
@@ -145,8 +213,11 @@ class EditTool : Tool {
                 occurrences > 1 -> return ToolResult("edit: oldText is not unique ($occurrences matches): ${oldText.take(60)}", true)
             }
             content = content.replaceFirst(oldText, newText)
+            if (content.toByteArray(Charsets.UTF_8).size > MAX_FILE_BYTES) {
+                return ToolResult("edit: result exceeds $MAX_FILE_BYTES bytes", true)
+            }
         }
-        file.writeText(content)
+        file.writeUtf8Atomically(content)
         return ToolResult("applied ${edits.size} edit(s) to $path")
     }
 
@@ -186,11 +257,11 @@ class LsTool : Tool {
         val dir = resolve(context, path).getOrElse { return ToolResult(it.message ?: "ls: bad path", true) }
         if (!dir.exists()) return ToolResult("ls: not found: $path", true)
         if (!dir.isDirectory) return ToolResult("ls: $path is not a directory", true)
-        val entries = dir.listFiles()
-            ?.sortedWith(compareBy({ !it.isDirectory }, { it.name }))
-            ?.joinToString("\n") { if (it.isDirectory) "${it.name}/" else it.name }
-            ?: ""
-        return ToolResult(entries.ifEmpty { "(empty directory)" })
+        val entries = dir.listFiles()?.sortedWith(compareBy({ !it.isDirectory }, { it.name })).orEmpty()
+        if (entries.isEmpty()) return ToolResult("(empty directory)")
+        val body = entries.take(MAX_RESULTS).joinToString("\n") { if (it.isDirectory) "${it.name}/" else it.name }
+        val more = if (entries.size > MAX_RESULTS) "\n[Showing $MAX_RESULTS of ${entries.size} entries.]" else ""
+        return ToolResult(body + more)
     }
 }
 
@@ -214,9 +285,11 @@ class GlobTool : Tool {
             if (matcher.matches(basePath.relativize(p))) {
                 matches += basePath.relativize(p).toString().replace('\\', '/')
             }
-            matches.size < MAX_RESULTS
+            matches.size <= MAX_RESULTS
         }
-        return ToolResult(if (matches.isEmpty()) "(no matches)" else matches.sorted().joinToString("\n"))
+        if (matches.isEmpty()) return ToolResult("(no matches)")
+        val more = if (matches.size > MAX_RESULTS) "\n[Results truncated after $MAX_RESULTS matches.]" else ""
+        return ToolResult(matches.sorted().take(MAX_RESULTS).joinToString("\n") + more)
     }
 }
 
@@ -249,13 +322,15 @@ class GrepTool : Tool {
                     for (i in lines.indices) {
                         if (regex.containsMatchIn(lines[i])) {
                             hits += "$rel:${i + 1}: ${lines[i].trim().take(200)}"
-                            if (hits.size >= MAX_RESULTS) return@walkFiles false
+                            if (hits.size > MAX_RESULTS) return@walkFiles false
                         }
                     }
                 }
             }
             true
         }
-        return ToolResult(if (hits.isEmpty()) "(no matches)" else hits.joinToString("\n"))
+        if (hits.isEmpty()) return ToolResult("(no matches)")
+        val more = if (hits.size > MAX_RESULTS) "\n[Results truncated after $MAX_RESULTS matches.]" else ""
+        return ToolResult(hits.take(MAX_RESULTS).joinToString("\n") + more)
     }
 }

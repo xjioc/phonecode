@@ -34,6 +34,13 @@ class ContextManagerTest {
         assertTrue(cm.isOverflow(9999, contextLimit = 5000))
     }
 
+    @Test fun smallModelsKeepAUsableContextBudget() {
+        val cm = ContextManager(SummaryProvider("s"))
+
+        assertFalse(cm.isOverflow(10_000, contextLimit = 16_000))
+        assertTrue(cm.isOverflow(12_000, contextLimit = 16_000))
+    }
+
     @Test fun compactSummarizesHeadKeepsRecentTailAndPreservesToolPairs() = runTest {
         val provider = SummaryProvider("SUMMARY-OF-HEAD")
         val cm = ContextManager(provider, keepRecentTokens = 10)

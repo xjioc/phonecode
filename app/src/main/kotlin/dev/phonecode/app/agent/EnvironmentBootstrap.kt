@@ -6,6 +6,11 @@ import android.net.ConnectivityManager
 import android.os.Build
 import java.io.File
 import java.io.InputStream
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
+import java.security.MessageDigest
+import java.util.UUID
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.zip.GZIPInputStream
 
@@ -13,6 +18,9 @@ object EnvironmentBootstrap {
 
     private const val ALPINE_VERSION = "3.21.7"
     private const val ALPINE_ASSET = "alpine-aarch64.rootfs"
+    private const val ALPINE_SHA256 = "d1d1a3fae5f4d6146e9742790a47fcb116199622cfb8439f218a4d5fbe5000da"
+    private const val MAX_ARCHIVE_ENTRY_BYTES = 512L * 1024L * 1024L
+    private const val MAX_ARCHIVE_BYTES = 2L * 1024L * 1024L * 1024L
 
     class Userland internal constructor(
         private val linux: Linux?,
@@ -76,10 +84,11 @@ object EnvironmentBootstrap {
     ) {
         // Marker is version-keyed so a newer bundled rootfs (after an app update) re-extracts instead of
         // running against the stale tree.
-        private val marker = File(rootfs.parentFile, "${rootfs.name}-$ALPINE_VERSION.ready")
+        private val marker = File(rootfs.parentFile, "${rootfs.name}-$ALPINE_VERSION-${ALPINE_SHA256.take(12)}.ready")
+        private val legacyMarker = File(rootfs.parentFile, "${rootfs.name}-$ALPINE_VERSION.ready")
         private val started = AtomicBoolean(false)
 
-        fun ready(): Boolean = marker.isFile
+        fun ready(): Boolean = migrateLinuxMarker(marker, legacyMarker, rootfs)
 
         /** Extract the bundled rootfs once, on a background thread (no-op if ready or already running). */
         fun kickoffSetup() {
@@ -101,18 +110,78 @@ object EnvironmentBootstrap {
          * calls the app already makes (write, mkdir, Os.symlink, chmod), all seccomp-allowed.
          */
         private fun extract(): Boolean {
-            rootfs.deleteRecursively()
-            rootfs.mkdirs()
+            require(assetSha256() == ALPINE_SHA256) { "bundled Alpine image failed verification" }
+            val parent = requireNotNull(rootfs.parentFile).apply { mkdirs() }
+            val staging = File(parent, ".${rootfs.name}-${UUID.randomUUID()}.staging")
+            val backup = File(parent, ".${rootfs.name}-${UUID.randomUUID()}.backup")
+            staging.mkdirs()
             tmpDir.mkdirs()
-            GZIPInputStream(assets.open(ALPINE_ASSET).buffered()).use { untar(it, rootfs) }
-            if (!File(rootfs, "bin").exists()) {
-                rootfs.deleteRecursively()
-                return false
+            marker.delete()
+            try {
+                GZIPInputStream(assets.open(ALPINE_ASSET).buffered()).use { untar(it, staging) }
+                require(File(staging, "bin/busybox").isFile) { "bundled Alpine image is incomplete" }
+                if (rootfs.exists()) moveDirectory(rootfs, backup)
+                try {
+                    moveDirectory(staging, rootfs)
+                    File(rootfs, "etc").mkdirs()
+                    updateDns()
+                    require(smokeTest()) { "bundled Alpine shell failed its readiness check" }
+                    marker.writeText("ok")
+                    marker.parentFile?.listFiles { file -> file.name.startsWith("${rootfs.name}-") && file.name.endsWith(".ready") && file != marker }
+                        .orEmpty().forEach(File::delete)
+                    backup.deleteRecursively()
+                    return true
+                } catch (error: Throwable) {
+                    marker.delete()
+                    rootfs.deleteRecursively()
+                    if (backup.exists()) moveDirectory(backup, rootfs)
+                    throw error
+                }
+            } finally {
+                staging.deleteRecursively()
+                if (ready()) backup.deleteRecursively()
             }
-            File(rootfs, "etc").mkdirs()
-            updateDns()
-            marker.writeText("ok")
-            return true
+        }
+
+        private fun smokeTest(): Boolean {
+            val workspace = File(workspacesRoot, ".runtime-check-${UUID.randomUUID()}")
+            if (!workspace.mkdirs()) return false
+            return try {
+                val process = ProcessBuilder(linuxShellArgv(proot, rootfs, tmpDir, workspacesRoot, workspace.absolutePath) +
+                    "printf phonecode-ready")
+                    .redirectErrorStream(true)
+                    .apply { environment().putAll(env()) }
+                    .start()
+                if (!process.waitFor(15, TimeUnit.SECONDS)) {
+                    process.destroyForcibly()
+                    false
+                } else {
+                    process.exitValue() == 0 && process.inputStream.bufferedReader().use { it.readText() } == "phonecode-ready"
+                }
+            } finally {
+                workspace.deleteRecursively()
+            }
+        }
+
+        private fun assetSha256(): String {
+            val digest = MessageDigest.getInstance("SHA-256")
+            assets.open(ALPINE_ASSET).use { input ->
+                val buffer = ByteArray(64 * 1024)
+                while (true) {
+                    val count = input.read(buffer)
+                    if (count < 0) break
+                    digest.update(buffer, 0, count)
+                }
+            }
+            return digest.digest().joinToString("") { "%02x".format(it) }
+        }
+
+        private fun moveDirectory(from: File, to: File) {
+            runCatching {
+                Files.move(from.toPath(), to.toPath(), StandardCopyOption.ATOMIC_MOVE)
+            }.getOrElse {
+                Files.move(from.toPath(), to.toPath())
+            }
         }
 
         private fun updateDns() {
@@ -127,20 +196,28 @@ object EnvironmentBootstrap {
          */
         private fun untar(input: InputStream, dest: File) {
             val header = ByteArray(512)
+            val root = dest.canonicalFile
+            var extractedBytes = 0L
             while (readFully(input, header)) {
                 if (header.all { it.toInt() == 0 }) break // end-of-archive marker
                 val name = cString(header, 0, 100)
                 if (name.isEmpty()) continue
                 val mode = octal(header, 100, 8)
                 val size = octal(header, 124, 12)
+                require(size in 0..MAX_ARCHIVE_ENTRY_BYTES) { "invalid Alpine archive entry size" }
+                extractedBytes += size
+                require(extractedBytes <= MAX_ARCHIVE_BYTES) { "bundled Alpine image is too large" }
                 val type = header[156].toInt().toChar()
-                val target = File(dest, name)
+                val target = File(root, name).canonicalFile
+                require(target.toPath().startsWith(root.toPath()) && (target != root || type == '5')) {
+                    "Alpine archive entry escapes its root"
+                }
                 when (type) {
                     '5' -> target.mkdirs()
                     '2' -> { // symlink: target path is in the linkname field, not data
                         target.parentFile?.mkdirs()
-                        target.delete()
-                        runCatching { android.system.Os.symlink(cString(header, 157, 100), target.absolutePath) }
+                        if (target.exists() || Files.isSymbolicLink(target.toPath())) require(target.delete())
+                        android.system.Os.symlink(cString(header, 157, 100), target.absolutePath)
                     }
                     '0', '\u0000' -> {
                         target.parentFile?.mkdirs()
@@ -148,8 +225,10 @@ object EnvironmentBootstrap {
                         skipN(input, padding(size))
                         if (mode and 0b001_000_000 != 0L) target.setExecutable(true, false)
                     }
-                    // '1' hardlink, '3'/'4' device, '6' fifo: no data blocks, skip.
-                    else -> Unit
+                    else -> {
+                        skipN(input, size)
+                        skipN(input, padding(size))
+                    }
                 }
             }
         }
@@ -160,7 +239,10 @@ object EnvironmentBootstrap {
             var off = 0
             while (off < buf.size) {
                 val n = input.read(buf, off, buf.size - off)
-                if (n < 0) return false
+                if (n < 0) {
+                    if (off == 0) return false
+                    error("truncated Alpine archive header")
+                }
                 off += n
             }
             return true
@@ -171,7 +253,7 @@ object EnvironmentBootstrap {
             var left = n
             while (left > 0) {
                 val r = input.read(buf, 0, minOf(left, buf.size.toLong()).toInt())
-                if (r < 0) break
+                if (r < 0) error("truncated Alpine archive entry")
                 out.write(buf, 0, r)
                 left -= r
             }
@@ -182,7 +264,7 @@ object EnvironmentBootstrap {
             val buf = ByteArray(8 * 1024)
             while (left > 0) {
                 val r = input.read(buf, 0, minOf(left, buf.size.toLong()).toInt())
-                if (r < 0) break
+                if (r < 0) error("truncated Alpine archive padding")
                 left -= r
             }
         }
@@ -210,6 +292,24 @@ object EnvironmentBootstrap {
             "LANG" to "C.UTF-8",
         )
     }
+}
+
+internal fun linuxTreeReady(marker: File, rootfs: File): Boolean {
+    val shell = File(rootfs, "bin/sh")
+    return marker.isFile &&
+        File(rootfs, "bin/busybox").isFile &&
+        (shell.isFile || Files.isSymbolicLink(shell.toPath()))
+}
+
+internal fun migrateLinuxMarker(marker: File, legacyMarker: File, rootfs: File): Boolean {
+    if (linuxTreeReady(marker, rootfs)) return true
+    if (!linuxTreeReady(legacyMarker, rootfs)) return false
+    return runCatching {
+        marker.writeText("ok")
+        check(marker.isFile)
+        legacyMarker.delete()
+        true
+    }.getOrDefault(false)
 }
 
 internal fun resolvConf(servers: List<String>): String =

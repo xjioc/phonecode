@@ -30,6 +30,8 @@ interface Tool {
     /** Whether this tool mutates state (and should therefore pass through permission). */
     val mutating: Boolean get() = false
 
+    fun mutates(args: JsonObject): Boolean = mutating
+
     /** True for tools only meaningful while planning (e.g. plan_exit); shown in PLAN mode, hidden in BUILD. */
     val planOnly: Boolean get() = false
 
@@ -47,12 +49,16 @@ interface Tool {
 
 /** Name-indexed set of tools available to the agent. */
 class ToolRegistry(tools: List<Tool>) {
-    @Volatile private var byName: Map<String, Tool> = tools.associateBy { it.name }
+    @Volatile private var byName: Map<String, Tool> = index(tools)
 
     fun get(name: String): Tool? = byName[name]
     fun all(): List<Tool> = byName.values.toList()
     fun replace(tools: List<Tool>) {
-        byName = tools.associateBy { it.name }
+        byName = index(tools)
     }
     fun snapshot(): ToolRegistry = ToolRegistry(all())
+
+    private fun index(tools: List<Tool>): Map<String, Tool> = LinkedHashMap<String, Tool>().apply {
+        tools.forEach { putIfAbsent(it.name, it) }
+    }
 }

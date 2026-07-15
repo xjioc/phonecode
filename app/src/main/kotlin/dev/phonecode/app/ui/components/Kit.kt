@@ -49,6 +49,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.input.KeyboardType
@@ -56,7 +57,6 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import dev.phonecode.app.ui.theme.ShapePill
-import dev.phonecode.app.ui.theme.ShapeMediumIcon
 import dev.phonecode.app.ui.theme.Spacing
 import dev.phonecode.app.ui.theme.PhoneSprings
 import androidx.compose.material3.Icon
@@ -109,15 +109,6 @@ fun Modifier.predictiveBackTransform(motion: PredictiveBackMotion): Modifier = g
     clip = fraction > 0f
 }
 
-// PhoneCode's monochrome component kit (Apple-feel: spring press feedback, hairline borders,
-// generous radii). Everything reads MaterialTheme.colorScheme so light/dark both work.
-
-/**
- * Press feedback: the scale lands INSTANTLY on touch-down (snap) and springs back on release with
- * a small physical pop (apple-motion-exact.md §2). Visual touch confirmation is Android's own
- * RIPPLE (restored - suppressing it was the single biggest "web app" tell); the spring keeps the
- * fluid hand-feel on top of the platform's language.
- */
 @Composable
 fun Modifier.pressFeedback(
     interaction: MutableInteractionSource,
@@ -132,7 +123,7 @@ fun Modifier.pressFeedback(
     )
     val scale by animateFloatAsState(
         targetValue = if (pressed) (pressedScale ?: 1f) else 1f,
-        animationSpec = if (pressed) snap() else spring(dampingRatio = 0.7f, stiffness = Spring.StiffnessMediumLow),
+        animationSpec = if (pressed) snap() else spring(dampingRatio = 1f, stiffness = 600f),
         label = "pressScale",
     )
     return this.graphicsLayer {
@@ -151,8 +142,8 @@ fun PcIconButton(icon: ImageVector, contentDescription: String?, modifier: Modif
         modifier
             .size(Spacing.touchTarget)
             .pressFeedback(interaction, pressedScale = 0.96f)
-            .clip(ShapeMediumIcon)
-            .clickable(interactionSource = interaction, indication = ripple(), onClick = onClick),
+            .clip(ShapePill)
+            .clickable(interactionSource = interaction, indication = ripple(), role = Role.Button, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) { Icon(icon, contentDescription, tint = tint, modifier = Modifier.size(22.dp)) }
 }
@@ -175,10 +166,10 @@ fun PcRoundButton(
         else -> colors.onBackground
     }
     Box(
-        modifier.size(Spacing.inputHeight)
+        modifier.size(Spacing.touchTarget)
             .pressFeedback(interaction, pressedScale = 0.95f)
             .clip(ShapePill).background(if (enabled) bg else colors.surfaceContainerHigh)
-            .clickable(interactionSource = interaction, indication = ripple(), enabled = enabled, onClick = onClick),
+            .clickable(interactionSource = interaction, indication = ripple(), enabled = enabled, role = Role.Button, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) { Icon(icon, contentDescription, tint = fg, modifier = Modifier.size(20.dp)) }
 }
@@ -209,9 +200,15 @@ fun PcRow(
     content: @Composable RowScope.() -> Unit,
 ) {
     val colors = MaterialTheme.colorScheme
+    val interaction = remember { MutableInteractionSource() }
     val base = Modifier.fillMaxWidth().clip(RoundedCornerShape(2.dp)).background(colors.surface)
         .heightIn(min = 52.dp)
-    val clickableBase = if (onClick != null) base.clickable(onClick = onClick) else base
+    val clickableBase = if (onClick != null) {
+        base.pressFeedback(interaction, pressedScale = 0.99f)
+            .clickable(interactionSource = interaction, indication = ripple(), role = Role.Button, onClick = onClick)
+    } else {
+        base
+    }
     Row(
         clickableBase.then(modifier).padding(horizontal = 14.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -291,7 +288,7 @@ fun PcButton(
     Row(
         modifier.fillMaxWidth().pressFeedback(interaction, pressedScale = 0.97f).clip(MaterialTheme.shapes.small)
             .background(background)
-            .clickable(interactionSource = interaction, indication = ripple(), enabled = enabled, onClick = onClick)
+            .clickable(interactionSource = interaction, indication = ripple(), enabled = enabled, role = Role.Button, onClick = onClick)
             .heightIn(min = Spacing.touchTarget).padding(horizontal = Spacing.m),
         horizontalArrangement = Arrangement.Center,
         verticalAlignment = Alignment.CenterVertically,

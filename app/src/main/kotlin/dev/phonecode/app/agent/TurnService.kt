@@ -15,9 +15,12 @@ import android.os.PowerManager
 import dev.phonecode.app.MainActivity
 import dev.phonecode.app.PhoneCodeApplication
 import dev.phonecode.app.R
+import java.util.concurrent.atomic.AtomicBoolean
+import kotlinx.coroutines.launch
 
 class TurnService : Service() {
     private var wakeLock: PowerManager.WakeLock? = null
+    private val stopping = AtomicBoolean()
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -36,9 +39,7 @@ class TurnService : Service() {
     @SuppressLint("WakelockTimeout")
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP) {
-            (application as PhoneCodeApplication).foregroundLeases.stopAll()
-            stopForeground(STOP_FOREGROUND_REMOVE)
-            stopSelfResult(startId)
+            stopWork(startId)
             return START_NOT_STICKY
         }
         val open = PendingIntent.getActivity(
@@ -85,7 +86,20 @@ class TurnService : Service() {
     }
 
     override fun onTimeout(startId: Int, fgsType: Int) {
-        (application as PhoneCodeApplication).foregroundLeases.stopAll()
+        stopWork(startId)
+    }
+
+    private fun stopWork(startId: Int) {
+        val app = application as PhoneCodeApplication
+        if (stopping.compareAndSet(false, true)) {
+            app.turnScope.launch {
+                try {
+                    app.foregroundLeases.stopAll()
+                } finally {
+                    stopping.set(false)
+                }
+            }
+        }
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelfResult(startId)
     }

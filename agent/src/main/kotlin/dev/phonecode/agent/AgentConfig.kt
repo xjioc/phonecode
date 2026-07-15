@@ -16,14 +16,6 @@ data class AgentConfig(
     val sessionId: String? = null,
 )
 
-data class SkillInfo(
-    val name: String,
-    val description: String,
-    val location: String = "",
-    val license: String = "",
-    val compatibility: String = "",
-)
-
 /**
  * Per-turn model + effort, resolved fresh each turn so the model can switch mid-session.
  * [contextLimit] (from the model catalog) drives compaction; null disables it. [maxOutput] caps

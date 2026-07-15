@@ -7,32 +7,45 @@
 <p align="center"><strong>A private, native coding agent that runs entirely on your Android phone.</strong></p>
 
 <p align="center">
+  <a href="https://ko-fi.com/dttdrv"><strong>Support PhoneCode on Ko-fi</strong></a> ·
   <a href="https://dttdrv.xyz/phonecode">Website</a> ·
-  <a href="https://github.com/dttdrv/phonecode/releases/latest">Latest release</a> ·
-  <a href="https://ko-fi.com/dttdrv">Support on Ko-fi</a>
+  <a href="https://github.com/dttdrv/phonecode/releases/latest">Latest release</a>
 </p>
+
+<p align="center"><sub>Support is optional and unlocks no features or services.</sub></p>
 
 <p align="center">
   <a href="https://github.com/dttdrv/phonecode/actions/workflows/checks.yml"><img src="https://github.com/dttdrv/phonecode/actions/workflows/checks.yml/badge.svg" alt="Checks"></a>
 </p>
 
+<p align="center">
+  <img src=".github/assets/showcase/phonecode-chat-hero.png" width="100%" alt="PhoneCode running on an Android phone">
+</p>
+
 PhoneCode runs the agent loop on your device. It reads, writes, and edits files in per-project
 workspaces, runs Git and a bundled Alpine Linux environment locally, searches the web, and talks to
-the model provider you choose. There is no PhoneCode backend, telemetry, remote execution service,
-or required account. API keys live in the Android Keystore, and prompts go only to the selected
-provider.
+the model provider you choose. There is no general-purpose PhoneCode backend, telemetry, remote
+execution service, or required account. The only developer-operated endpoint accepts AI-output
+reports you explicitly submit. API keys live in the Android Keystore.
 
-## App
+## Built for real work
+
+<p align="center">
+  <img src=".github/assets/showcase/phonecode-projects.png" width="49%" alt="PhoneCode projects and sessions">
+  <img src=".github/assets/showcase/phonecode-skills.png" width="49%" alt="PhoneCode skills manager">
+</p>
+
+<p align="center"><sub>Folder-backed projects and sessions · Built-in, editable, hot-reloading skills</sub></p>
+
+## Interface
 
 <p align="center">
   <img src=".github/assets/screens/conversation.png" width="30%" alt="PhoneCode conversation">
   &nbsp;
-  <img src=".github/assets/screens/add-menu.png" width="30%" alt="PhoneCode add menu">
+  <img src=".github/assets/screens/attachment-menu.png" width="30%" alt="PhoneCode attachment menu">
   &nbsp;
-  <img src=".github/assets/screens/drawer.png" width="30%" alt="PhoneCode projects drawer">
+  <img src=".github/assets/screens/project-sessions.png" width="30%" alt="PhoneCode projects drawer">
 </p>
-
-<p align="center"><sub>Conversation · Anchored controls · Projects</sub></p>
 
 <p align="center">
   <img src=".github/assets/screens/onboarding.png" width="30%" alt="PhoneCode onboarding">
@@ -40,7 +53,7 @@ provider.
   <img src=".github/assets/screens/settings.png" width="30%" alt="PhoneCode settings">
 </p>
 
-<p align="center"><sub>Onboarding · Settings</sub></p>
+<p align="center"><sub>Conversation · Attachments · Projects · Guided setup · Settings</sub></p>
 
 PhoneCode is an independent project inspired by OpenCode and interoperable with it. It is not a
 build of OpenCode.
@@ -52,10 +65,9 @@ build of OpenCode.
 
 ## Features
 
-- **On-device agent** with a native coding-agent tool surface: read, write,
-  edit, glob, grep, ls, apply_patch, todo lists, plan and build modes, user questions, subagents
-  (task tool), webfetch with free web search, MCP servers (Streamable HTTP and SSE), and
-  progressive-disclosure skills (SKILL.md).
+- **On-device agent** with bounded file and process tools, Git, durable todo lists, plan and build
+  modes, user questions, subagents, cancellable web access, MCP servers, and progressive-disclosure
+  skills. Tool input and bounded output remain inspectable from the chat timeline.
 - **On-device development runtime in active migration.** The current arm64 Alpine/PRoot runtime is
   a sideload development prototype. The Google Play architecture is a software-emulated QEMU Linux
   VM so packages execute on a virtual CPU behind an isolated Android process. The app will not claim
@@ -68,15 +80,20 @@ build of OpenCode.
 - **Sign-in flows**: GitHub uses the OAuth device flow (you type a code, with no tokens to paste)
   for push and pull. "Sign in with ChatGPT" (Codex, OAuth + PKCE) lets you use a paid ChatGPT plan
   as a provider through OpenAI's Responses API - no API key needed.
-- **Projects and chats**: chats are organized into projects. Each project is its own workspace
-  folder and git repository, with snapshots (commits), branch switching, and push and pull from the
-  chat's git button.
+- **Projects and sessions**: chats are organized into folder-backed projects. Active-session state,
+  partial turns, tool checkpoints, and todos survive restarts; project instructions can come from
+  bounded root-level `AGENTS.md` or `CLAUDE.md` files.
+- **Skills and MCP management**: seven starter skills ship with the app. Global and project skills can
+  be created, edited, enabled, and hot-reloaded without restarting a chat. MCP configuration is
+  validated before activation, reconnects live, and clears unavailable tools instead of leaving a
+  stale tool surface.
 - **Phone files**: link only the Android folders you choose, then keep reads and writes approval-gated
   or allow them automatically per your workspace settings.
 - **Streaming chat** with reasoning traces, a tool-activity timeline, monochrome syntax
   highlighting, a context-window gauge, and per-model token limits that drive compaction.
 - **Crash-safe sessions** with foreground execution, bounded pre-output retries, durable tool
-  checkpoints, atomic local storage, and explicit recovery when Android interrupts a turn.
+  checkpoints, atomic local storage, cancellable network calls, and explicit recovery when Android
+  interrupts or you stop a turn.
 - **Privacy by construction**: keys are encrypted on-device, Android cloud backup is disabled, and
   manual chat/settings exports use a file you choose through the Storage Access Framework.
 

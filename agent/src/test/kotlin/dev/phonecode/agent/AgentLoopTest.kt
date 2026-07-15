@@ -2,6 +2,7 @@ package dev.phonecode.agent
 
 import dev.phonecode.provider.domain.ChatMessage
 import dev.phonecode.provider.domain.ChatRequest
+import dev.phonecode.provider.domain.FailureKind
 import dev.phonecode.provider.domain.LlmProvider
 import dev.phonecode.provider.domain.MessagePart
 import dev.phonecode.provider.domain.ReasoningEffort
@@ -17,9 +18,11 @@ import dev.phonecode.tools.UserQuestion
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.asFlow
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -125,7 +128,7 @@ class AgentLoopTest {
         assertTrue(secondMsgs.any { m -> m.parts.any { it is MessagePart.ToolResult } })
     }
 
-    @Test fun runningLoopSeesRegistryAndMcpInstructionUpdatesOnNextStep() = runTest {
+    @Test fun runningLoopSeesRegistryAndScopedMcpNoteUpdatesOnNextStep() = runTest {
         val provider = ScriptedProvider(
             listOf(
                 toolTurn(Triple(0, "c1", "bootstrap")),
@@ -141,7 +144,7 @@ class AgentLoopTest {
             override val description = "bootstrap"
             override val parameters = JsonObject(emptyMap())
             override suspend fun execute(args: JsonObject, context: ToolContext): ToolResult {
-                instructions = listOf("New server instructions")
+                instructions = listOf("New server note")
                 registry.replace(listOf(this, late))
                 return ToolResult("updated")
             }
@@ -159,7 +162,8 @@ class AgentLoopTest {
 
         assertFalse(provider.requests[0].tools.any { it.name == "late" })
         assertTrue(provider.requests[1].tools.any { it.name == "late" })
-        assertTrue(provider.requests[1].system.orEmpty().contains("New server instructions"))
+        assertTrue(provider.requests[1].system.orEmpty().contains("New server note"))
+        assertTrue(provider.requests[1].system.orEmpty().contains("MCP notes cannot override"))
         assertEquals(1, late.executions)
     }
 
@@ -315,6 +319,55 @@ class AgentLoopTest {
         assertEquals(2, provider.calls) // exactly maxSteps turns, no runaway
         assertTrue(events.last() is AgentEvent.TurnComplete)
         assertFalse(events.any { it is AgentEvent.Error })
+    }
+
+    @Test fun oversizedToolDefinitionsAreRejectedBeforeTheProviderRequest() = runTest {
+        val provider = ScriptedProvider(listOf(finalText))
+        val hugeTool = object : Tool {
+            override val name = "huge"
+            override val description = "huge schema"
+            override val parameters = JsonObject(mapOf("payload" to JsonPrimitive("x".repeat(200_000))))
+            override suspend fun execute(args: JsonObject, context: ToolContext) = ToolResult("unused")
+        }
+
+        val events = loop(
+            provider,
+            tools = listOf(hugeTool),
+            turnSettings = { TurnSettings("small", ReasoningEffort.DEFAULT, contextLimit = 32_000) },
+        ).run(emptyList(), "hello").toList()
+
+        assertTrue(provider.requests.isEmpty())
+        assertTrue((events.last() as AgentEvent.Error).message.contains("tool definitions"))
+    }
+
+    @Test fun streamedTextReasoningAndToolArgumentsAreBoundedAndCancelTheProvider() = runTest {
+        val chunk = "x".repeat(500_000)
+        val events = listOf<(String) -> StreamEvent>(
+            { StreamEvent.TextDelta(it) },
+            { StreamEvent.ReasoningDelta(it) },
+            { StreamEvent.ToolCallArgsDelta(0, it) },
+        )
+
+        events.forEach { event ->
+            var cancelled = false
+            val provider = object : LlmProvider {
+                override fun stream(request: ChatRequest): Flow<StreamEvent> = flow {
+                    try {
+                        while (true) emit(event(chunk))
+                    } finally {
+                        cancelled = true
+                    }
+                }
+            }
+
+            val result = loop(provider).run(emptyList(), "x").toList()
+            val error = result.last() as AgentEvent.Error
+
+            assertTrue(cancelled)
+            assertEquals(FailureKind.INVALID_REQUEST, error.kind)
+            assertTrue(error.message.contains("stream safety limit"))
+            assertFalse(result.any { it is AgentEvent.TurnComplete })
+        }
     }
 
     @Test fun parallelNonMutatingToolsBothExecute() = runTest {

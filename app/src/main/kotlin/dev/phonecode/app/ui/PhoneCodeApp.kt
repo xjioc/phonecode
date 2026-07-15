@@ -3,7 +3,6 @@ package dev.phonecode.app.ui
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.snap
@@ -14,7 +13,6 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -70,11 +68,13 @@ import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -92,7 +92,6 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
@@ -101,6 +100,7 @@ import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.res.painterResource
 import androidx.core.view.WindowCompat
 import androidx.compose.ui.text.font.FontWeight
@@ -109,6 +109,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.compose.runtime.collectAsState
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.currentBackStackEntryAsState
+import androidx.navigation.compose.rememberNavController
 import dev.phonecode.app.agent.ChatViewModel
 import dev.phonecode.app.R
 import dev.phonecode.app.PhoneCodeApplication
@@ -118,10 +122,10 @@ import dev.phonecode.app.data.SkillStatus
 import dev.phonecode.app.data.ThemeMode
 import dev.phonecode.app.ui.chat.ChatScreen
 import dev.phonecode.app.ui.onboarding.OnboardingScreen
+import dev.phonecode.app.ui.components.PcIconButton
 import dev.phonecode.app.ui.components.PcButton
 import dev.phonecode.app.ui.components.PcField
 import dev.phonecode.app.ui.components.MorphingMenu
-import dev.phonecode.app.ui.components.predictiveBackTransform
 import dev.phonecode.app.ui.components.pressFeedback
 import dev.phonecode.app.ui.components.rememberContentOverscroll
 import dev.phonecode.app.ui.components.rememberPredictiveBackMotion
@@ -134,14 +138,14 @@ import dev.phonecode.app.ui.theme.PhoneSprings
 import dev.phonecode.app.ui.theme.ShapePill
 import dev.phonecode.app.ui.theme.Spacing
 import dev.phonecode.app.ui.theme.phoneHaze
+import dev.phonecode.app.ui.theme.phoneHazeEffect
 import dev.chrisbanes.haze.HazeState
-import dev.chrisbanes.haze.hazeEffect
 import dev.chrisbanes.haze.hazeSource
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-private val WHEN = SimpleDateFormat("d MMM", Locale.getDefault())
+private fun formatSessionDate(value: Long) = SimpleDateFormat("d MMM", Locale.getDefault()).format(Date(value))
 private enum class DrawerValue { CLOSED, OPEN }
 
 private tailrec fun android.content.Context.findActivity(): android.app.Activity? = when (this) {
@@ -162,9 +166,10 @@ fun PhoneCodeApp() {
     val settingsVm: SettingsViewModel = viewModel()
     val settings by settingsVm.settings.collectAsState()
     val settingsLoaded by settingsVm.loaded.collectAsState()
+    val chatState by vm.state.collectAsState()
     // First-run overlay up: hide everything behind it from accessibility so TalkBack can't reach
     // the chat/settings controls under the modal.
-    val showOnboarding = settingsLoaded && !settings.onboarded
+    val needsOnboarding = settingsLoaded && !settings.onboarded
 
     val dark = when (settings.mode) {
         ThemeMode.LIGHT -> false
@@ -187,11 +192,6 @@ fun PhoneCodeApp() {
                     val controller = WindowCompat.getInsetsController(window, view)
                     controller.isAppearanceLightStatusBars = !dark
                     controller.isAppearanceLightNavigationBars = !dark
-                    // Re-assert transparent bars unconditionally. targetSdk is 34, so on Android 15 (API 35+)
-                    // setStatusBarColor is STILL honored and the system paints a backward-compat scrim behind
-                    // the bars unless we clear it - the old `SDK_INT < 35` guard disabled exactly the fix those
-                    // devices need, leaving a black band under the status bar. Becomes a harmless no-op only if
-                    // targetSdk is ever raised to 35 (where edge-to-edge transparency is enforced anyway).
                     @Suppress("DEPRECATION")
                     window.statusBarColor = android.graphics.Color.TRANSPARENT
                     @Suppress("DEPRECATION")
@@ -204,13 +204,17 @@ fun PhoneCodeApp() {
             }
         }
 
-        var route by rememberSaveable { mutableStateOf("chat") }
-        var routePredictiveCommit by remember { mutableStateOf(false) }
+        val navController = rememberNavController()
+        val navEntry by navController.currentBackStackEntryAsState()
+        val route = navEntry?.destination?.route ?: "chat"
+        val showOnboarding = needsOnboarding && route != "onboarding-settings"
         val focusManager = LocalFocusManager.current
         var settingsInitial by rememberSaveable { mutableStateOf("home") }
+        var onboardingStep by rememberSaveable { mutableIntStateOf(0) }
 
-        val screenWidth = LocalConfiguration.current.screenWidthDp.dp
         val density = LocalDensity.current
+        val windowInfo = LocalWindowInfo.current
+        val screenWidth = with(density) { windowInfo.containerSize.width.toDp() }
         val drawerWidth = screenWidth * 0.82f
         val drawerWidthPx = with(density) { drawerWidth.toPx() }
         val drawerState = remember {
@@ -240,13 +244,19 @@ fun PhoneCodeApp() {
             drawerScope.launch { drawerState.animateTo(DrawerValue.CLOSED, PhoneSprings.drawer) }
             Unit
         }
-        var projectPickFromOnboarding by remember { mutableStateOf(false) }
+        val navigateFromDrawer: (String) -> Unit = { destination ->
+            closeDrawer()
+            navController.navigate(destination) { launchSingleTop = true }
+        }
         val projectPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
             if (uri != null) {
                 vm.createProject(uri)
-                if (projectPickFromOnboarding) settingsVm.update { it.copy(onboarded = true) }
             }
-            projectPickFromOnboarding = false
+        }
+        val openProjectPickerFromDrawer: () -> Unit = {
+            closeDrawer()
+            projectPicker.launch(null)
+            Unit
         }
         LaunchedEffect(drawerState.targetValue) {
             if (drawerState.targetValue == DrawerValue.OPEN) focusManager.clearFocus()
@@ -255,11 +265,6 @@ fun PhoneCodeApp() {
         val drawerBackMotion = rememberPredictiveBackMotion(enabled = drawerVisible) {
             drawerState.animateTo(DrawerValue.CLOSED, snap())
         }
-        val routeBackMotion = rememberPredictiveBackMotion(enabled = !drawerVisible && route != "chat") {
-            routePredictiveCommit = true
-            route = "chat"
-        }
-        LaunchedEffect(route) { routePredictiveCommit = false }
         val progress = drawerProgress * (1f - drawerBackMotion.progress)
 
         Box(
@@ -301,34 +306,44 @@ fun PhoneCodeApp() {
                         Modifier.fillMaxSize()
                             .then(if (route == "chat") Modifier else Modifier.clearAndSetSemantics {}),
                     ) {
-                        ChatScreen(vm, onOpenDrawer = openDrawer, sendOnEnter = settings.sendOnEnter)
+                        ChatScreen(
+                            vm = vm,
+                            onOpenDrawer = openDrawer,
+                            onOpenProviderSetup = { providerId ->
+                                settingsInitial = "provider:$providerId"
+                                navController.navigate("settings") { launchSingleTop = true }
+                            },
+                            sendOnEnter = settings.sendOnEnter,
+                        )
                     }
-                    AnimatedContent(
-                        targetState = route,
-                        modifier = Modifier.fillMaxSize().predictiveBackTransform(routeBackMotion),
-                        transitionSpec = {
-                            if (routePredictiveCommit) {
-                                androidx.compose.animation.EnterTransition.None togetherWith
-                                    androidx.compose.animation.ExitTransition.None
-                            } else {
-                                val pop = targetState == "chat"
-                                (if (pop) {
-                                    (slideInHorizontally(tween(260, easing = PhoneEasings.iOSStandard)) { -it / 4 }) togetherWith
-                                        slideOutHorizontally(tween(220, easing = PhoneEasings.iOSStandard)) { it }
-                                } else {
-                                    (slideInHorizontally(tween(260, easing = PhoneEasings.iOSStandard)) { it }) togetherWith
-                                        slideOutHorizontally(tween(220, easing = PhoneEasings.iOSStandard)) { -it / 4 }
-                                }).apply { targetContentZIndex = if (pop) -1f else 1f }
-                            }
+                    NavHost(
+                        navController = navController,
+                        startDestination = "chat",
+                        modifier = Modifier.fillMaxSize(),
+                        enterTransition = {
+                            slideInHorizontally(tween(240, easing = PhoneEasings.iOSStandard)) { it }
                         },
-                        label = "route",
-                    ) { r ->
-                        if (r != "chat") Box(Modifier.fillMaxSize()) {
-                            when (r) {
-                                "settings" -> SettingsScreen(vm, settingsVm, onBack = { route = "chat" }, initialPage = settingsInitial)
-                                "skills" -> SettingsScreen(vm, settingsVm, onBack = { route = "chat" }, initialPage = "skills")
-                                "mcp" -> SettingsScreen(vm, settingsVm, onBack = { route = "chat" }, initialPage = "mcp")
-                            }
+                        exitTransition = { androidx.compose.animation.ExitTransition.None },
+                        popEnterTransition = { androidx.compose.animation.EnterTransition.None },
+                        popExitTransition = {
+                            slideOutHorizontally(tween(180, easing = PhoneEasings.iOSStandard)) { it }
+                        },
+                    ) {
+                        composable("chat") {}
+                        composable("settings") {
+                            SettingsScreen(vm, settingsVm, onBack = { navController.popBackStack() }, initialPage = settingsInitial)
+                        }
+                        composable("skills") {
+                            SettingsScreen(vm, settingsVm, onBack = { navController.popBackStack() }, initialPage = "skills")
+                        }
+                        composable("mcp") {
+                            SettingsScreen(vm, settingsVm, onBack = { navController.popBackStack() }, initialPage = "mcp")
+                        }
+                        composable(
+                            route = "onboarding-settings",
+                            enterTransition = { androidx.compose.animation.EnterTransition.None },
+                        ) {
+                            SettingsScreen(vm, settingsVm, onBack = { navController.popBackStack() }, initialPage = settingsInitial)
                         }
                     }
                 }
@@ -354,14 +369,11 @@ fun PhoneCodeApp() {
                             onToggleCollapse = { id ->
                                 collapsedProjects = if (id in collapsedProjects) collapsedProjects - id else collapsedProjects + id
                             },
-                            onOpenChat = { closeDrawer(); route = "chat" },
-                            onNewProject = {
-                                closeDrawer()
-                                projectPicker.launch(null)
-                            },
-                            onOpenSettings = { closeDrawer(); settingsInitial = "home"; route = "settings" },
-                            onOpenSkills = { closeDrawer(); route = "skills" },
-                            onOpenMcp = { closeDrawer(); route = "mcp" },
+                            onOpenChat = closeDrawer,
+                            onNewProject = openProjectPickerFromDrawer,
+                            onOpenSettings = { settingsInitial = "home"; navigateFromDrawer("settings") },
+                            onOpenSkills = { navigateFromDrawer("skills") },
+                            onOpenMcp = { navigateFromDrawer("mcp") },
                         )
                     }
                 }
@@ -371,21 +383,26 @@ fun PhoneCodeApp() {
             androidx.compose.animation.AnimatedVisibility(
                 visible = showOnboarding,
                 enter = androidx.compose.animation.EnterTransition.None,
-                exit = androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(280)),
+                exit = slideOutHorizontally(tween(220, easing = PhoneEasings.iOSStandard)) { -it / 4 } +
+                    fadeOut(tween(160, easing = PhoneEasings.iOSStandard)),
             ) {
                 OnboardingScreen(
+                    step = onboardingStep,
+                    onStepChange = { onboardingStep = it },
                     onConnectModels = {
-                        settingsVm.update { it.copy(onboarded = true) }
-                        settingsInitial = "providers"; route = "settings"
+                        settingsInitial = "providers"
+                        navController.navigate("onboarding-settings") { launchSingleTop = true }
                     },
                     onConnectGitHub = {
-                        settingsVm.update { it.copy(onboarded = true) }
-                        settingsInitial = "git"; route = "settings"
+                        settingsInitial = "git"
+                        navController.navigate("onboarding-settings") { launchSingleTop = true }
                     },
                     onCreateProject = {
-                        projectPickFromOnboarding = true
                         projectPicker.launch(null)
                     },
+                    modelReady = vm.hasConfiguredProvider(),
+                    githubReady = chatState.githubLogin != null,
+                    projectReady = chatState.projects.isNotEmpty(),
                     onDone = { settingsVm.update { it.copy(onboarded = true) } },
                 )
             }
@@ -414,6 +431,8 @@ private fun Sidebar(
     var projectMenu by remember { mutableStateOf<Project?>(null) }
     var renameChat by remember { mutableStateOf<SessionMeta?>(null) }
     var renameProject by remember { mutableStateOf<Project?>(null) }
+    var deleteChat by remember { mutableStateOf<SessionMeta?>(null) }
+    var deleteProject by remember { mutableStateOf<Project?>(null) }
     var archivedOpen by remember { mutableStateOf(false) }
     val searchFocus = remember { FocusRequester() }
     val focusManager = LocalFocusManager.current
@@ -463,6 +482,7 @@ private fun Sidebar(
         ChatRow(
             meta = meta,
             active = meta.id == state.currentSessionId,
+            running = meta.id == state.currentSessionId && state.isRunning,
             indent = indent,
             onClick = { vm.switchSession(meta.id); onOpenChat() },
             onMenu = { chatMenu = meta },
@@ -477,7 +497,7 @@ private fun Sidebar(
                 onRequestRename = { renameChat = meta },
                 onMove = { vm.moveSession(meta.id, it) },
                 onArchive = { vm.setSessionArchived(meta.id, !meta.archived) },
-                onDelete = { vm.deleteSession(meta.id) },
+                onDelete = { deleteChat = meta },
             )
         }
     }
@@ -503,6 +523,17 @@ private fun Sidebar(
             ) {
             item {
                 Text("Projects", style = MaterialTheme.typography.labelMedium, color = colors.onSurfaceVariant, modifier = Modifier.padding(start = 12.dp, top = 14.dp, bottom = 6.dp))
+            }
+            if (query.isNotBlank() && matchingProjects.isEmpty() && filtered.isEmpty()) {
+                item(key = "search_empty") {
+                    Column(
+                        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 28.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        Text("No results for \"${query.take(40)}\"", style = MaterialTheme.typography.bodyMedium, color = colors.onSurfaceVariant)
+                        TextButton(onClick = ::closeSearch, modifier = Modifier.heightIn(min = Spacing.touchTarget)) { Text("Clear search") }
+                    }
+                }
             }
             if (state.projects.isEmpty() && query.isBlank()) {
                 item(key = "projects_empty") {
@@ -538,36 +569,26 @@ private fun Sidebar(
                         Icon(Icons.Outlined.Folder, null, tint = colors.secondary, modifier = Modifier.size(19.dp))
                         Text(project.name, style = MaterialTheme.typography.titleSmall, color = colors.onBackground, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
                         Text("${byProject[project.id]?.size ?: 0}", style = MaterialTheme.typography.labelMedium, color = colors.tertiary)
-                        Box(
-                            Modifier.size(34.dp).clip(MaterialTheme.shapes.extraSmall)
-                                .clickable { vm.newChat(project.id); onOpenChat() },
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Icon(Icons.Filled.Add, "New chat in ${project.name}", tint = colors.secondary, modifier = Modifier.size(16.dp))
-                        }
+                        PcIconButton(
+                            icon = Icons.Filled.Add,
+                            contentDescription = "New chat in ${project.name}",
+                            tint = colors.secondary,
+                        ) { vm.newChat(project.id); onOpenChat() }
                         Box {
-                            val menuInteraction = remember { MutableInteractionSource() }
-                            Box(
-                                Modifier.size(34.dp).pressFeedback(menuInteraction, pressedScale = 0.95f)
-                                    .clip(MaterialTheme.shapes.extraSmall)
-                                    .clickable(interactionSource = menuInteraction, indication = ripple(bounded = false, radius = 18.dp)) { projectMenu = project },
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                Icon(Icons.Filled.MoreVert, "Project options", tint = colors.secondary, modifier = Modifier.size(18.dp))
-                            }
+                            PcIconButton(Icons.Filled.MoreVert, "Project options", tint = colors.secondary) { projectMenu = project }
                             MorphingMenu(
                                 expanded = projectMenu?.id == project.id,
                                 onDismiss = { projectMenu = null },
                                 above = false,
                                 alignEnd = true,
-                                anchorSize = 34.dp,
+                                anchorSize = 48.dp,
                                 modifier = Modifier.width(240.dp),
                             ) {
                                 ProjectOptionsMenu(
                                     project = project,
                                     onDismiss = { projectMenu = null },
                                     onRequestRename = { renameProject = project },
-                                    onDelete = { vm.deleteProject(project.id) },
+                                    onDelete = { deleteProject = project },
                                 )
                             }
                         }
@@ -607,7 +628,7 @@ private fun Sidebar(
                 item(key = "h_archived") {
                     Row(
                         Modifier.fillMaxWidth().clip(MaterialTheme.shapes.small).clickable { archivedOpen = !archivedOpen }
-                            .heightIn(min = 40.dp).padding(start = 12.dp, end = 8.dp, top = 8.dp, bottom = 2.dp),
+                            .heightIn(min = Spacing.touchTarget).padding(start = 12.dp, end = 8.dp, top = 8.dp, bottom = 2.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
@@ -629,7 +650,7 @@ private fun Sidebar(
         Row(
             Modifier.align(Alignment.BottomCenter).fillMaxWidth()
                 .shadow(2.dp, RectangleShape, clip = false)
-                .then(if (blurChrome) Modifier.hazeEffect(hazeState, hazeStyle) else Modifier)
+                .then(if (blurChrome) Modifier.phoneHazeEffect(hazeState, hazeStyle) else Modifier)
                 .background(if (blurChrome) colors.background.copy(alpha = 0.35f) else colors.background)
                 .padding(start = 14.dp, end = 14.dp, top = 8.dp, bottom = 10.dp),
             verticalAlignment = Alignment.Bottom,
@@ -669,7 +690,7 @@ private fun Sidebar(
         Column(
             Modifier.align(Alignment.TopCenter).fillMaxWidth()
                 .shadow(if (listScrolled) 2.dp else 0.dp, RectangleShape, clip = false)
-                .then(if (blurChrome) Modifier.hazeEffect(hazeState, hazeStyle) else Modifier)
+                .then(if (blurChrome) Modifier.phoneHazeEffect(hazeState, hazeStyle) else Modifier)
                 .background(if (blurChrome) colors.background.copy(alpha = 0.35f) else colors.background),
         ) {
             Row(
@@ -733,6 +754,26 @@ private fun Sidebar(
     renameProject?.let { project ->
         TextPromptDialog("Rename project", "Project name", project.name, { renameProject = null }) {
             vm.renameProject(project.id, it); renameProject = null
+        }
+    }
+    deleteChat?.let { meta ->
+        ConfirmDeleteDialog(
+            title = "Delete chat?",
+            detail = "${meta.title} will be removed from this device.",
+            onDismiss = { deleteChat = null },
+        ) {
+            vm.deleteSession(meta.id)
+            deleteChat = null
+        }
+    }
+    deleteProject?.let { project ->
+        ConfirmDeleteDialog(
+            title = "Delete project?",
+            detail = "The project link will be removed and its chats moved to Unsorted. Workspace files stay under Recovered projects. The linked phone folder is not deleted.",
+            onDismiss = { deleteProject = null },
+        ) {
+            vm.deleteProject(project.id)
+            deleteProject = null
         }
     }
 }
@@ -840,6 +881,7 @@ private fun SectionHeader(label: String) {
 private fun ChatRow(
     meta: SessionMeta,
     active: Boolean,
+    running: Boolean,
     indent: androidx.compose.ui.unit.Dp,
     onClick: () -> Unit,
     onMenu: () -> Unit,
@@ -874,21 +916,18 @@ private fun ChatRow(
                 )
             }
         }
-        Text(WHEN.format(Date(meta.updatedAt)), style = MaterialTheme.typography.labelSmall, color = colors.tertiary, modifier = Modifier.padding(start = 8.dp))
+        Text(if (running) "Running" else formatSessionDate(meta.updatedAt), style = MaterialTheme.typography.labelSmall, color = if (running) colors.primary else colors.tertiary, modifier = Modifier.padding(start = 8.dp))
         // Three-dot overflow: pin / move / archive / delete (also reachable via long-press).
-        val menuInteraction = remember { MutableInteractionSource() }
         Box(
-            Modifier.size(32.dp).pressFeedback(menuInteraction, pressedScale = 0.95f).clip(MaterialTheme.shapes.extraSmall)
-                .clickable(interactionSource = menuInteraction, indication = ripple(bounded = false, radius = 18.dp), onClick = onMenu),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(Icons.Filled.MoreVert, "Chat options", tint = colors.secondary, modifier = Modifier.size(18.dp))
+            PcIconButton(Icons.Filled.MoreVert, "Chat options", tint = colors.secondary, onClick = onMenu)
             MorphingMenu(
                 expanded = menuExpanded,
                 onDismiss = onDismissMenu,
                 above = false,
                 alignEnd = true,
-                anchorSize = 32.dp,
+                anchorSize = 48.dp,
                 modifier = Modifier.width(280.dp),
                 content = menuContent,
             )
@@ -955,13 +994,12 @@ private fun ChatOptionsMenu(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             if (mode == "move") {
-                Icon(
+                PcIconButton(
                     Icons.AutoMirrored.Filled.KeyboardArrowRight,
                     "Back",
                     tint = MaterialTheme.colorScheme.secondary,
-                    modifier = Modifier.size(20.dp).graphicsLayer { rotationZ = 180f }.clickable { mode = "menu" },
-                )
-                Spacer(Modifier.width(10.dp))
+                    modifier = Modifier.graphicsLayer { rotationZ = 180f },
+                ) { mode = "menu" }
             }
             Text(
                 if (mode == "move") "Move to" else meta.title,
@@ -997,6 +1035,23 @@ private fun ProjectOptionsMenu(project: Project, onDismiss: () -> Unit, onReques
         )
         MenuActionRow("Rename", Icons.Outlined.Edit) { onDismiss(); onRequestRename() }
         MenuActionRow("Delete project", Icons.Outlined.DeleteOutline, destructive = true) { onDelete(); onDismiss() }
+    }
+}
+
+@Composable
+private fun ConfirmDeleteDialog(
+    title: String,
+    detail: String,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    OptionsCard(title, onDismiss) {
+        Text(detail, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Spacer(Modifier.height(Spacing.m))
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Spacing.xs)) {
+            Box(Modifier.weight(1f)) { PcButton("Cancel", filled = false, onClick = onDismiss) }
+            Box(Modifier.weight(1f)) { PcButton("Delete", destructive = true, onClick = onConfirm) }
+        }
     }
 }
 

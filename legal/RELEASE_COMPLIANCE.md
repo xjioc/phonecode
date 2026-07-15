@@ -11,8 +11,8 @@ marked blocked has evidence attached to the release commit and artifact.
 | OpenCode adapted material | Notice present | Preserve the complete 2025 opencode MIT notice in the repository and app. Record the exact upstream revision used for future adaptations. |
 | PRoot and talloc | Blocked | Remove the unmatched binaries or publish exact source, patches, build scripts, toolchain pin, reproducible outputs, GPL-2.0-or-later and LGPL-3.0-or-later texts, and relinking or modification materials required by the applicable licenses. |
 | Alpine rootfs | Blocked | Publish exact corresponding source and build recipes for every installed package, complete notices, and an SBOM beside the binary download. |
-| Mermaid | Blocked | Upgrade from 10.9.3, pin the supported bundle, and generate notices for every embedded dependency and resolved version. |
-| Fonts | Blocked | Pin exact upstream release files, verify hashes, and package copyright statements and the complete OFL-1.1 text. |
+| Mermaid | Blocked | The security-backport bundle is pinned at 10.9.6; generate notices for every embedded dependency and resolved version. |
+| Fonts | Blocked | Pin the exact JetBrains Mono release files, verify hashes, and package copyright statements and the complete OFL-1.1 text. |
 | Android and JVM graph | Blocked | Generate a release SBOM from the resolved release graph and package complete notices, including transitive dependencies. |
 | QEMU VM payload | Not shipping | Publish QEMU, kernel, initramfs, and linked-library source and changes beside any future binary; preserve the executable-process boundary. |
 | Privacy and terms | In progress | Keep `legal/` identical to the in-app assets, publish the public URLs, and make Play Data safety and Apple privacy answers match actual network behavior. |

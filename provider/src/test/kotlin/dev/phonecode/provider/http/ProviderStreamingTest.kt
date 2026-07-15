@@ -129,4 +129,25 @@ class ProviderStreamingTest {
         assertFalse(failure.retryable)
         server.shutdown()
     }
+
+    @Test fun oversizedSseLineFailsWithoutRetrying() = runBlocking {
+        val server = MockWebServer()
+        server.enqueue(
+            MockResponse()
+                .setHeader("Content-Type", "text/event-stream")
+                .setBody("data: " + "x".repeat(300_000)),
+        )
+        server.start()
+        val preset = ProviderPreset(
+            "t", "T", server.url("/v1").toString().trimEnd('/'),
+            WireFormat.OPENAI_COMPAT, AuthScheme.BEARER,
+        )
+
+        val failure = OpenAiCompatProvider(preset, "k", OkHttpClient()).stream(userReq()).toList().single() as StreamEvent.Failed
+
+        assertEquals(FailureKind.PARSE, failure.kind)
+        assertFalse(failure.retryable)
+        assertTrue(failure.message.contains("SSE line exceeds"))
+        server.shutdown()
+    }
 }

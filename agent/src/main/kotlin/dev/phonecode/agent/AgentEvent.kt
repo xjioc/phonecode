@@ -13,9 +13,6 @@ sealed interface AgentEvent {
     data class Retrying(val attempt: Int, val message: String) : AgentEvent
     data class HistoryCheckpoint(val messages: List<ChatMessage>) : AgentEvent
 
-    /** Older messages were summarized to stay within the context window. */
-    data class Compacted(val messageCount: Int) : AgentEvent
-
     /** A queued/steering message the user sent mid-turn was just folded into the conversation, so the UI
      *  can drop it into the timeline at the right point and clear it from the pending list. */
     data class UserMessage(val text: String) : AgentEvent

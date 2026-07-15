@@ -16,6 +16,7 @@ data class AppSettings(
     val defaultMode: String = "BUILD",
     /** First-run onboarding shown and dismissed (round-4). */
     val onboarded: Boolean = false,
+    val activeSessionId: String? = null,
 ) {
     val mode: ThemeMode get() = runCatching { ThemeMode.valueOf(themeMode) }.getOrDefault(ThemeMode.SYSTEM)
 }

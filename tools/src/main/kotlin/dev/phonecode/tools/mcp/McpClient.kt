@@ -1,6 +1,8 @@
 package dev.phonecode.tools.mcp
 
 import dev.phonecode.tools.Tool
+import dev.phonecode.tools.http.awaitResponse
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -44,36 +46,56 @@ data class McpConnectionResult(
 
 private val JSON_MEDIA = "application/json".toMediaType()
 
-suspend fun connectMcpServers(config: McpConfig, http: OkHttpClient): List<Tool> = connectMcpServersDetailed(config, http).tools
-
 suspend fun probeMcpServer(name: String, config: McpServerConfig, http: OkHttpClient): McpServerSnapshot {
     val timeout = config.timeout.coerceIn(1_000, MAX_CONNECT_TIMEOUT_MS)
     return withTimeoutOrNull(timeout) {
-        runCatching { McpClient(name, config.copy(enabled = true), http).probe() }
-            .getOrElse { McpServerSnapshot(false, error = it.message ?: "Connection failed") }
+        try {
+            McpClient(name, config.copy(enabled = true), http).probe()
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Throwable) {
+            McpServerSnapshot(false, error = error.message ?: "Connection failed")
+        }
     } ?: McpServerSnapshot(false, error = "Connection timed out")
 }
 
-suspend fun connectMcpServersDetailed(config: McpConfig, http: OkHttpClient): McpConnectionResult =
+suspend fun connectMcpServersDetailed(
+    config: McpConfig,
+    http: OkHttpClient,
+    reservedNames: Set<String> = emptySet(),
+): McpConnectionResult =
     coroutineScope {
         val servers = config.mcp.filter { it.value.enabled }.map { (name, server) ->
             async {
                 val client = McpClient(name, server, http)
                 val snapshot = withTimeoutOrNull(server.timeout.coerceIn(1_000, MAX_CONNECT_TIMEOUT_MS)) {
-                    runCatching { client.probe() }.getOrElse { McpServerSnapshot(false, error = it.message ?: "Connection failed") }
+                    try {
+                        client.probe()
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (error: Throwable) {
+                        McpServerSnapshot(false, error = error.message ?: "Connection failed")
+                    }
                 } ?: McpServerSnapshot(false, error = "Connection timed out")
                 Triple(name, snapshot, client.tools(snapshot))
             }
         }.awaitAll()
-        McpConnectionResult(
-            tools = servers.flatMap { it.third },
-            snapshots = servers.associate { it.first to it.second },
-        )
+        val usedNames = reservedNames.toMutableSet()
+        var promptBytes = 0
+        val tools = servers.asSequence().flatMap { it.third.asSequence() }.filter { tool ->
+            val bytes = tool.name.length + tool.description.length + tool.parameters.toString().length
+            val accepted = usedNames.add(tool.name) && promptBytes + bytes <= MAX_AGGREGATE_PROMPT_BYTES
+            if (accepted) promptBytes += bytes
+            accepted
+        }.take(MAX_AGGREGATE_TOOLS).toList()
+        McpConnectionResult(tools, servers.associate { it.first to it.second })
     }
 
 private const val MAX_CONNECT_TIMEOUT_MS = 60_000L
 private const val TOOL_TIMEOUT_MS = 10L * 60L * 1000L
-private const val MAX_RESPONSE_BYTES = 8L * 1024L * 1024L
+private const val MAX_RESPONSE_BYTES = 2L * 1024L * 1024L
+private const val MAX_AGGREGATE_TOOLS = 128
+private const val MAX_AGGREGATE_PROMPT_BYTES = 1_500_000
 
 private data class McpHttpResponse(val code: Int, val body: String)
 
@@ -92,9 +114,13 @@ class McpClient(
     // full read timeout (verification finding). Derived clients share the pool, so this is cheap.
     // Tool CALLS keep the long-lived client: a legitimate MCP tool may stream for minutes.
     private val handshakeHttp = http.newBuilder()
+        .followRedirects(false)
+        .followSslRedirects(false)
         .callTimeout(config.timeout.coerceIn(1_000, MAX_CONNECT_TIMEOUT_MS), java.util.concurrent.TimeUnit.MILLISECONDS)
         .build()
     private val toolHttp = http.newBuilder()
+        .followRedirects(false)
+        .followSslRedirects(false)
         .callTimeout(TOOL_TIMEOUT_MS, java.util.concurrent.TimeUnit.MILLISECONDS)
         .build()
     @Volatile private var handshaking = false
@@ -149,7 +175,7 @@ class McpClient(
                 serverVersion = info?.string("version").orEmpty(),
                 capabilities = capabilities,
                 tools = if ("tools" in capabilities) listTools() else emptyList(),
-                instructions = result.string("instructions"),
+                instructions = result.string("instructions").take(4_096),
             )
         } finally {
             handshaking = false
@@ -165,10 +191,12 @@ class McpClient(
             val result = message["result"] as? JsonObject ?: break
             (result["tools"] as? JsonArray).orEmpty().take(MAX_TOOLS - out.size).forEach { element ->
                 val obj = element as? JsonObject ?: return@forEach
-                val name = (obj["name"] as? JsonPrimitive)?.contentOrNull ?: return@forEach
-                val title = (obj["title"] as? JsonPrimitive)?.contentOrNull.orEmpty()
-                val description = (obj["description"] as? JsonPrimitive)?.contentOrNull ?: ""
-                val schema = (obj["inputSchema"] as? JsonObject)?.takeIf { it.containsKey("type") } ?: EMPTY_SCHEMA
+                val name = (obj["name"] as? JsonPrimitive)?.contentOrNull?.take(128)?.takeIf { it.isNotBlank() } ?: return@forEach
+                val title = (obj["title"] as? JsonPrimitive)?.contentOrNull.orEmpty().take(256)
+                val description = ((obj["description"] as? JsonPrimitive)?.contentOrNull ?: "").take(2_000)
+                val schema = (obj["inputSchema"] as? JsonObject)
+                    ?.takeIf { it.containsKey("type") && it.toString().length <= MAX_SCHEMA_CHARS }
+                    ?: EMPTY_SCHEMA
                 out += McpToolDef(name, title, description, schema)
             }
             cursor = (result["nextCursor"] as? JsonPrimitive)?.contentOrNull
@@ -205,7 +233,7 @@ class McpClient(
             ?.code in 200..299
     }
 
-    private fun post(body: String): McpHttpResponse? {
+    private suspend fun post(body: String): McpHttpResponse? {
         val request = Request.Builder()
             .url(config.url)
             .post(body.toRequestBody(JSON_MEDIA))
@@ -217,7 +245,7 @@ class McpClient(
                 protocolVersion?.let { header("MCP-Protocol-Version", it) }
             }
             .build()
-        return (if (handshaking) handshakeHttp else toolHttp).newCall(request).execute().use { response ->
+        return (if (handshaking) handshakeHttp else toolHttp).newCall(request).awaitResponse { response ->
             if (!response.isSuccessful) error("HTTP ${response.code} ${response.message}".trim())
             response.header("Mcp-Session-Id")?.let { sessionId = it }
             val source = response.body?.source()
@@ -225,7 +253,7 @@ class McpClient(
                 McpHttpResponse(response.code, "")
             } else {
                 source.request(MAX_RESPONSE_BYTES + 1)
-                if (source.buffer.size > MAX_RESPONSE_BYTES) error("MCP response exceeds 8 MiB")
+                if (source.buffer.size > MAX_RESPONSE_BYTES) error("MCP response exceeds 2 MiB")
                 McpHttpResponse(response.code, source.readUtf8())
             }
         }
@@ -273,7 +301,8 @@ class McpClient(
     private companion object {
         const val LATEST_PROTOCOL = "2025-11-25"
         val SUPPORTED_PROTOCOLS = setOf(LATEST_PROTOCOL, "2025-06-18", "2025-03-26")
-        const val MAX_TOOLS = 500
+        const val MAX_TOOLS = 64
+        const val MAX_SCHEMA_CHARS = 16_000
         val EMPTY_SCHEMA = buildJsonObject { put("type", "object"); putJsonObject("properties") {} }
     }
 }

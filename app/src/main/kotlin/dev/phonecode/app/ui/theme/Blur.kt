@@ -6,10 +6,8 @@ import androidx.compose.foundation.background
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.unit.dp
 import dev.chrisbanes.haze.HazeEffectScope
 import dev.chrisbanes.haze.HazeProgressive
@@ -58,9 +56,8 @@ private fun HazeEffectScope.applyDefaults() {
     if (isRobolectric) blurEnabled = false
 }
 
-/** A floating blurred pill/chip - the v2 chrome surface (clip + tinted backdrop blur). */
-fun Modifier.blurPill(state: HazeState, style: HazeStyle, shape: Shape = ShapePill): Modifier =
-    clip(shape).hazeEffect(state, style) { applyDefaults() }
+fun Modifier.phoneHazeEffect(state: HazeState, style: HazeStyle): Modifier =
+    hazeEffect(state, style) { applyDefaults() }
 
 /**
  * A dissolve band: a light blur that ramps in a little before the bar, with the content fading

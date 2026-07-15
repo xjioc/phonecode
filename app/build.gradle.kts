@@ -27,11 +27,10 @@ android {
     defaultConfig {
         applicationId = "dev.phonecode"
         minSdk = 26
-        targetSdk = 35
-        versionCode = 30
-        versionName = "0.3.0"
+        targetSdk = 36
+        versionCode = 40
+        versionName = "0.4.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-        vectorDrawables { useSupportLibrary = true }
         ndk { abiFilters += "arm64-v8a" }
     }
 
@@ -105,7 +104,6 @@ dependencies {
     implementation(project(":tools"))
 
     implementation(libs.androidx.core.ktx)
-    implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.androidx.activity.compose)
@@ -113,7 +111,6 @@ dependencies {
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.ui)
     implementation(libs.androidx.ui.graphics)
-    implementation(libs.androidx.ui.tooling.preview)
     implementation(libs.androidx.material3)
     implementation(libs.androidx.material.icons.extended)
     implementation(libs.androidx.navigation.compose)
@@ -137,8 +134,6 @@ dependencies {
     // must merge into the app manifest for Robolectric to resolve createComposeRule's activity.
     debugImplementation(libs.androidx.ui.test.manifest)
     androidTestImplementation(libs.androidx.junit)
-    androidTestImplementation(libs.androidx.espresso.core)
-    androidTestImplementation(platform(libs.androidx.compose.bom))
 }
 
 val prototypeRuntimeFiles = listOf(
@@ -155,18 +150,6 @@ val legalVendoredFiles = files(
 
 val verifyLegalInventory by tasks.registering {
     val checksumFile = rootProject.file("VENDORED_CHECKSUMS")
-    val legalFiles = listOf(
-        rootProject.file("LICENSE"),
-        rootProject.file("legal/privacy.md"),
-        rootProject.file("legal/terms.md"),
-        rootProject.file("legal/RELEASE_COMPLIANCE.md"),
-        rootProject.file("THIRD_PARTY.md"),
-        file("src/main/assets/privacy.md"),
-        file("src/main/assets/terms.md"),
-        file("src/main/assets/licenses.md"),
-        file("src/main/jniLibs/PROVENANCE.md"),
-    )
-    inputs.files(checksumFile, legalVendoredFiles, legalFiles)
     doLast {
         val shaPattern = Regex("[0-9a-f]{64}")
         val entries = checksumFile.readLines().filter(String::isNotBlank).associate { line ->
@@ -206,7 +189,7 @@ val verifyLegalInventory by tasks.registering {
         check(notices.contains("Copyright 2026 dttdrv") && notices.contains("Apache License 2.0")) {
             "The in-app PhoneCode license notice is incomplete"
         }
-        check(listOf("OpenCode", "Mermaid", "Inter", "JetBrains Mono", "Alpine", "PRoot", "talloc").all(notices::contains)) {
+        check(listOf("OpenCode", "Mermaid", "JetBrains Mono", "Alpine", "PRoot", "talloc").all(notices::contains)) {
             "The in-app open-source notice inventory is incomplete"
         }
         val thirdParty = rootProject.file("THIRD_PARTY.md").readText()
@@ -231,7 +214,6 @@ val verifyPrototypeRuntimeBoundary by tasks.registering {
     val hostSources = rootProject.fileTree(rootProject.projectDir) {
         include("app/src/main/**/*.kt", "agent/src/main/**/*.kt", "tools/src/main/**/*.kt")
     }
-    inputs.files(prototypeRuntimeFiles + registry + bootstrap, hostSources)
     doLast {
         check(prototypeRuntimeFiles.all(File::exists)) {
             "The bundled local runtime is incomplete"
@@ -253,12 +235,6 @@ val verifyPrototypeRuntimeBoundary by tasks.registering {
     }
 }
 
-val verifyPlayReleaseBoundary by tasks.registering {
-    doLast {
-        error("Google Play release blocked: package a reproducible QEMU payload and pass the runtime, licensing, API 26/34/35, and AAB audits")
-    }
-}
-
 val playReleaseArtifactTasks = setOf(
     "assembleRelease",
     "bundleRelease",
@@ -270,7 +246,7 @@ val playReleaseArtifactTasks = setOf(
 
 gradle.taskGraph.whenReady {
     if (allTasks.any { it.project == project && it.name in playReleaseArtifactTasks }) {
-        error("Google Play release blocked: package a reproducible QEMU payload and pass the runtime, licensing, API 26/34/35, and AAB audits")
+        error("Google Play release blocked: package a reproducible QEMU payload and pass the runtime, licensing, API 26/34/35/36, 16 KB page-size, and AAB audits")
     }
 }
 

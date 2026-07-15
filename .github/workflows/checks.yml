@@ -21,16 +21,14 @@ jobs:
         with:
           packages: platform-tools platforms;android-37.0 build-tools;36.0.0
       - uses: gradle/actions/setup-gradle@v6
-      - name: Verify vendored artifacts
-        run: shasum -a 256 --check VENDORED_CHECKSUMS
       - name: Test and lint
-        run: ./gradlew --no-daemon test lintDebug :app:verifyLegalInventory
+        run: ./gradlew --no-daemon test lintDebug :app:verifyLegalInventory :app:verifyPrototypeRuntimeBoundary
       - name: Build development artifact
         run: ./gradlew --no-daemon :app:assembleDebug :app:lintRelease
       - name: Verify Play release gate
         shell: bash
         run: |
-          if ./gradlew --no-daemon :app:verifyPlayReleaseBoundary; then
+          if ./gradlew --no-daemon :app:assembleRelease; then
             echo "Play release gate unexpectedly passed before the VM runtime landed"
             exit 1
           fi

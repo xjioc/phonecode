@@ -4,6 +4,8 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.remember
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.github.takahirom.roborazzi.captureRoboImage
 import dev.phonecode.app.ui.onboarding.OnboardingScreen
@@ -35,7 +37,15 @@ class OnboardingScreenshotTest {
     fun onboardingPages() {
         compose.setContent {
             PhoneCodeTheme(darkTheme = true) {
-                OnboardingScreen(onConnectModels = {}, onConnectGitHub = {}, onCreateProject = {}, onDone = {})
+                val step = remember { mutableIntStateOf(0) }
+                OnboardingScreen(
+                    step = step.intValue,
+                    onStepChange = { step.intValue = it },
+                    onConnectModels = {},
+                    onConnectGitHub = {},
+                    onCreateProject = {},
+                    onDone = {},
+                )
             }
         }
         compose.waitForIdle()

@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.only
@@ -35,6 +36,7 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.outlined.AccountTree
 import androidx.compose.material.icons.outlined.AutoAwesome
+import androidx.compose.material.icons.outlined.Build
 import androidx.compose.material.icons.outlined.Cloud
 import androidx.compose.material.icons.outlined.Extension
 import androidx.compose.material.icons.outlined.Folder
@@ -62,13 +64,16 @@ import kotlinx.coroutines.delay
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.shadow
@@ -79,6 +84,7 @@ import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.material3.ripple
 import kotlinx.coroutines.launch
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.phonecode.app.agent.ChatViewModel
@@ -86,6 +92,9 @@ import dev.phonecode.app.R
 import dev.phonecode.app.data.CustomModel
 import dev.phonecode.app.data.CustomProvider
 import dev.phonecode.app.data.ManagedSkill
+import dev.phonecode.app.data.isSafeMcpEndpoint
+import dev.phonecode.app.data.isSafeCustomProviderId
+import dev.phonecode.app.data.isSafeProviderEndpoint
 import dev.phonecode.app.data.SkillScope
 import dev.phonecode.app.data.SkillStatus
 import dev.phonecode.app.data.ThemeMode
@@ -100,6 +109,7 @@ import dev.phonecode.app.ui.components.PcSectionLabel
 import dev.phonecode.app.ui.components.PcToggle
 import dev.phonecode.app.ui.components.contentVerticalScroll
 import dev.phonecode.app.ui.components.predictiveBackTransform
+import dev.phonecode.app.ui.components.pressFeedback
 import dev.phonecode.app.ui.components.rememberPredictiveBackMotion
 import dev.phonecode.app.ui.theme.PcMono
 import dev.phonecode.app.ui.theme.PhoneEasings
@@ -109,6 +119,7 @@ import dev.phonecode.agent.AgentMode
 import dev.phonecode.tools.mcp.McpServerConfig
 import dev.phonecode.tools.mcp.McpServerSnapshot
 import java.text.SimpleDateFormat
+import java.security.MessageDigest
 import java.util.Date
 import java.util.Locale
 
@@ -129,26 +140,42 @@ private fun depthOf(page: String): Int = when {
     else -> 1
 }
 
+private fun revisionOf(value: String): String = MessageDigest.getInstance("SHA-256")
+    .digest(value.toByteArray(Charsets.UTF_8))
+    .joinToString("") { "%02x".format(it) }
+
+private fun revisionOf(config: McpServerConfig): String = revisionOf(buildString {
+    append(config.type).append('\u0000').append(config.url).append('\u0000')
+    config.headers.toSortedMap().forEach { (name, value) ->
+        append(name).append('\u0000').append(value).append('\u0000')
+    }
+    append(config.enabled).append('\u0000').append(config.timeout)
+})
+
 /** Settings: a home list + every sub-page, navigated with an iOS-style slide.
  *  [initialPage] lets callers (onboarding) deep-link straight to a sub-page. */
 @Composable
 fun SettingsScreen(vm: ChatViewModel, settingsVm: SettingsViewModel, onBack: () -> Unit, initialPage: String = "home") {
     var page by rememberSaveable(initialPage) { mutableStateOf(initialPage) }
     var predictiveCommit by remember { mutableStateOf(false) }
+    var nestedBackActive by remember { mutableStateOf(false) }
     val navigateBack = {
         if (page == initialPage) onBack() else page = parentOf(page)
     }
 
-    val backMotion = rememberPredictiveBackMotion(enabled = page != initialPage) {
+    val backMotion = rememberPredictiveBackMotion(enabled = page != initialPage && !nestedBackActive) {
         predictiveCommit = true
         navigateBack()
     }
-    LaunchedEffect(page) { predictiveCommit = false }
+    LaunchedEffect(page) {
+        predictiveCommit = false
+        nestedBackActive = false
+    }
 
     Box(Modifier.fillMaxSize()) {
         if (backMotion.progress > 0f) {
             Box(Modifier.fillMaxSize()) {
-                SettingsPageContent(parentOf(page), vm, settingsVm, onBack = {}, navigate = {})
+                SettingsPageContent(parentOf(page), vm, settingsVm, onBack = {}, navigate = {}, onNestedBackActive = {})
             }
         }
         Box(Modifier.fillMaxSize().predictiveBackTransform(backMotion)) {
@@ -172,7 +199,7 @@ fun SettingsScreen(vm: ChatViewModel, settingsVm: SettingsViewModel, onBack: () 
                 label = "settings",
             ) { p ->
                 Box(Modifier.fillMaxSize()) {
-                    SettingsPageContent(p, vm, settingsVm, navigateBack) { page = it }
+                    SettingsPageContent(p, vm, settingsVm, navigateBack, { page = it }) { nestedBackActive = it }
                 }
             }
         }
@@ -186,14 +213,16 @@ private fun SettingsPageContent(
     settingsVm: SettingsViewModel,
     onBack: () -> Unit,
     navigate: (String) -> Unit,
+    onNestedBackActive: (Boolean) -> Unit,
 ) {
     when (page) {
         "general" -> GeneralPage(settingsVm, onBack)
         "appearance" -> AppearancePage(settingsVm, onBack)
         "personal" -> PersonalPage(settingsVm, onBack)
         "providers" -> ProvidersPage(vm, onOpenProvider = { navigate("provider:$it") }, onBack = onBack)
-        "mcp" -> McpPage(vm, onBack)
-        "skills" -> SkillsPage(vm, onBack)
+        "mcp" -> McpPage(vm, onBack, onNestedBackActive)
+        "skills" -> SkillsPage(vm, onBack, onNestedBackActive)
+        "tools" -> AgentToolsPage(vm, onBack)
         "files" -> FilesPage(vm, settingsVm, onBack)
         "git" -> GitPage(vm, settingsVm, onBack)
         "export" -> ExportPage(vm, settingsVm, onBack)
@@ -216,7 +245,12 @@ private fun SettingsPageContent(
 // ---------------------------------------------------------------------------------------------
 
 @Composable
-private fun Page(title: String, onBack: () -> Unit, content: @Composable () -> Unit) {
+private fun Page(
+    title: String,
+    onBack: () -> Unit,
+    action: (@Composable () -> Unit)? = null,
+    content: @Composable () -> Unit,
+) {
     val colors = MaterialTheme.colorScheme
     val scrollState = rememberScrollState()
     val scrolled by remember { derivedStateOf { scrollState.value > 0 } }
@@ -247,7 +281,7 @@ private fun Page(title: String, onBack: () -> Unit, content: @Composable () -> U
                 textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                 modifier = Modifier.weight(1f),
             )
-            Spacer(Modifier.width(Spacing.touchTarget))
+            if (action == null) Spacer(Modifier.width(Spacing.touchTarget)) else Box(Modifier.width(Spacing.touchTarget)) { action() }
         }
     }
 }
@@ -270,7 +304,7 @@ private fun NavRow(label: String, value: String? = null, icon: ImageVector? = nu
 @Composable
 private fun ToggleRow(label: String, sub: String? = null, checked: Boolean, onChange: (Boolean) -> Unit) {
     val colors = MaterialTheme.colorScheme
-    PcRow {
+    PcRow(onClick = { onChange(!checked) }) {
         Column(Modifier.weight(1f)) {
             Text(label, style = MaterialTheme.typography.bodyMedium, color = colors.onBackground)
             if (sub != null) Text(sub, style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant, modifier = Modifier.padding(top = 1.dp))
@@ -319,6 +353,7 @@ private fun HomePage(vm: ChatViewModel, settingsVm: SettingsViewModel, onBack: (
         }
         PcSectionLabel("Tools")
         PcGroup {
+            NavRow("Agent tools", value = vm.availableTools().size.toString(), icon = Icons.Outlined.Build) { onOpen("tools") }
             NavRow("MCP servers", value = "${state.mcpServers.size}", icon = Icons.Outlined.Extension) { onOpen("mcp") }
             NavRow(
                 "Skills",
@@ -344,6 +379,37 @@ private fun HomePage(vm: ChatViewModel, settingsVm: SettingsViewModel, onBack: (
         Spacer(Modifier.height(8.dp))
         PcGroup {
             NavRow("About", icon = Icons.Outlined.Info) { onOpen("about") }
+        }
+    }
+}
+
+@Composable
+private fun AgentToolsPage(vm: ChatViewModel, onBack: () -> Unit) {
+    val state by vm.state.collectAsStateWithLifecycle()
+    var query by rememberSaveable { mutableStateOf("") }
+    val inventory = remember(state.mcpToolCount, state.skills.size) { vm.availableTools() }
+    val tools = remember(inventory, query) {
+        inventory.filter {
+            query.isBlank() || it.name.contains(query, true) || it.description.contains(query, true) || it.source.contains(query, true)
+        }
+    }
+    val colors = MaterialTheme.colorScheme
+    Page("Agent tools", onBack) {
+        Note("${inventory.size} available · read-only tools work in Plan mode · mutating actions follow your approval setting")
+        PcField(query, { query = it }, "Search tools")
+        tools.groupBy { it.source }.forEach { (source, entries) ->
+            PcSectionLabel(source)
+            PcGroup {
+                entries.forEach { tool ->
+                    PcRow {
+                        Column(Modifier.weight(1f)) {
+                            Text(tool.name, style = MaterialTheme.typography.bodyLarge.copy(fontFamily = PcMono), color = colors.onBackground)
+                            Text(tool.description, style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        }
+                        Text(tool.access, style = MaterialTheme.typography.labelSmall, color = colors.tertiary)
+                    }
+                }
+            }
         }
     }
 }
@@ -376,6 +442,7 @@ private fun FilesPage(vm: ChatViewModel, settingsVm: SettingsViewModel, onBack: 
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
         if (uri != null) vm.linkSharedFolder(uri)
     }
+    var pendingUnlinkId by rememberSaveable { mutableStateOf<String?>(null) }
     Page("Files & permissions", onBack) {
         PcSectionLabel("Workspace")
         PcGroup {
@@ -398,7 +465,7 @@ private fun FilesPage(vm: ChatViewModel, settingsVm: SettingsViewModel, onBack: 
                             Text(folder.name, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onBackground)
                             Text(if (folder.writable) "Read & write" else "Read only", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
-                        PcIconButton(Icons.Filled.Delete, "Remove ${folder.name}") { vm.unlinkSharedFolder(folder.id) }
+                        PcIconButton(Icons.Filled.Delete, "Remove ${folder.name}") { pendingUnlinkId = folder.id }
                     }
                 }
             }
@@ -427,6 +494,23 @@ private fun FilesPage(vm: ChatViewModel, settingsVm: SettingsViewModel, onBack: 
             Spacer(Modifier.height(10.dp))
             Note(it)
             LaunchedEffect(it) { delay(5000); vm.clearError() }
+        }
+    }
+    pendingUnlinkId?.let { folderId ->
+        val folder = state.sharedFolders.firstOrNull { it.id == folderId }
+        val projects = state.projects.count { it.folderId == folderId }
+        ConfirmActionDialog(
+            title = "Remove folder access?",
+            message = if (projects == 0) {
+                "PhoneCode will lose access to ${folder?.name ?: "this folder"}. The phone folder itself is not deleted."
+            } else {
+                "PhoneCode will unlink ${folder?.name ?: "this folder"}, move $projects project${if (projects == 1) "" else "s"} and their chats to Unsorted, and keep private workspace files under Recovered projects. The phone folder itself is not deleted."
+            },
+            action = "Remove access",
+            onDismiss = { pendingUnlinkId = null },
+        ) {
+            vm.unlinkSharedFolder(folderId)
+            pendingUnlinkId = null
         }
     }
 }
@@ -501,6 +585,10 @@ private fun ProvidersPage(vm: ChatViewModel, onOpenProvider: (String) -> Unit, o
                 modifier = Modifier.padding(horizontal = Spacing.m, vertical = Spacing.xs),
             )
         }
+        state.providerConfigError?.let {
+            Text(it, style = MaterialTheme.typography.bodyMedium, color = colors.error)
+            Note("The existing providers.json was preserved. Fix it before changing custom providers here.")
+        }
         // Hoist the provider list and the key lookup out of per-recomposition work: keyFor() decrypts from
         // EncryptedSharedPreferences, so doing it per row per frame ran crypto on every toggle/recompose.
         // Keyed on state.models (changes when custom providers reload); a fresh entry after editing a key
@@ -532,12 +620,12 @@ private fun ProvidersPage(vm: ChatViewModel, onOpenProvider: (String) -> Unit, o
         // OpenAI-compatible or Anthropic-style endpoint, stored in providers.json (the same
         // file the agent can edit), so both paths land in one catalog.
         Spacer(Modifier.height(Spacing.s))
-        PcButton("Add custom provider", filled = false, icon = Icons.Filled.Add) { addingCustom = true }
+        PcButton("Add custom provider", filled = false, icon = Icons.Filled.Add, enabled = state.providerConfigError == null) { addingCustom = true }
     }
     if (addingCustom) {
         CustomProviderDialog(
             existingIds = vm.allProviders().map { it.id }.toSet(),
-            onSave = { id, provider -> vm.saveCustomProvider(id, provider) },
+            onSave = vm::saveCustomProvider,
             onDismiss = { addingCustom = false },
         )
     }
@@ -549,6 +637,7 @@ private fun ProviderDetailPage(vm: ChatViewModel, providerId: String, onBack: ()
     val colors = MaterialTheme.colorScheme
     val preset = vm.allProviders().firstOrNull { it.id == providerId }
     var key by remember(providerId) { mutableStateOf(vm.keyFor(providerId)) }
+    var confirmRemove by remember(providerId) { mutableStateOf(false) }
     Page(preset?.displayName ?: providerId, onBack) {
         if (providerId == "codex") {
             PcSectionLabel("Account")
@@ -601,8 +690,19 @@ private fun ProviderDetailPage(vm: ChatViewModel, providerId: String, onBack: ()
         if (vm.isCustomProvider(providerId)) {
             PcSectionLabel("Custom provider")
             PcGroup {
-                PcRow(onClick = { vm.deleteCustomProvider(providerId); onBack() }) {
-                    Text("Remove this provider", style = MaterialTheme.typography.bodyLarge, color = colors.error)
+                PcRow(onClick = {
+                    if (confirmRemove) {
+                        vm.deleteCustomProvider(providerId)
+                        onBack()
+                    } else {
+                        confirmRemove = true
+                    }
+                }) {
+                    Text(
+                        if (confirmRemove) "Tap again to remove provider" else "Remove this provider",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = colors.error,
+                    )
                 }
             }
         }
@@ -610,7 +710,7 @@ private fun ProviderDetailPage(vm: ChatViewModel, providerId: String, onBack: ()
 }
 
 @Composable
-private fun McpPage(vm: ChatViewModel, onBack: () -> Unit) {
+private fun McpPage(vm: ChatViewModel, onBack: () -> Unit, onNestedBackActive: (Boolean) -> Unit) {
     val state by vm.state.collectAsStateWithLifecycle()
     var editing by rememberSaveable { mutableStateOf<String?>(null) }
     var query by rememberSaveable { mutableStateOf("") }
@@ -621,6 +721,10 @@ private fun McpPage(vm: ChatViewModel, onBack: () -> Unit) {
         if (editorDirty) confirmDiscard = true else editing = null
     }
     val detailBackMotion = rememberPredictiveBackMotion(enabled = editing != null && !confirmDiscard) { closeEditor() }
+    DisposableEffect(editing) {
+        onNestedBackActive(editing != null)
+        onDispose { onNestedBackActive(false) }
+    }
     val visible = remember(state.mcpServers, query) {
         state.mcpServers.filter { (name, server) ->
             query.isBlank() || name.contains(query, true) || server.url.contains(query, true)
@@ -642,7 +746,7 @@ private fun McpPage(vm: ChatViewModel, onBack: () -> Unit) {
         if (state.mcpServers.isNotEmpty()) PcField(query, { query = it }, "Search servers")
         PcSectionLabel("Servers")
         if (state.mcpServers.isEmpty()) {
-            Note("No MCP servers configured. Add one to give the agent extra tools over HTTP.")
+            Note("No MCP servers configured. Add one over HTTPS, or use local HTTP for a server on this device.")
         } else {
             PcGroup {
                 visible.entries.forEach { (name, server) ->
@@ -718,16 +822,20 @@ private fun McpServerPage(
     val colors = MaterialTheme.colorScheme
     val isNew = initialName.isEmpty()
     val scope = rememberCoroutineScope()
-    var name by remember(initialName) { mutableStateOf(initialName) }
-    var url by remember(initialName, initial) { mutableStateOf(initial.url) }
-    var headers by remember(initialName, initial) { mutableStateOf(initial.headers.entries.joinToString("\n") { "${it.key}: ${it.value}" }) }
-    var timeout by remember(initialName, initial) { mutableStateOf(initial.timeout.toString()) }
-    var enabled by remember(initialName, initial) { mutableStateOf(initial.enabled) }
-    var error by remember(initialName, initial) { mutableStateOf<String?>(null) }
+    var baseline by remember(initialName) { mutableStateOf(initial) }
+    val currentRevision = remember(initial) { revisionOf(initial) }
+    var acceptedRevision by rememberSaveable(initialName) { mutableStateOf(currentRevision) }
+    var name by rememberSaveable(initialName) { mutableStateOf(initialName) }
+    var url by rememberSaveable(initialName) { mutableStateOf(initial.url) }
+    var headers by rememberSaveable(initialName) { mutableStateOf(initial.headers.entries.joinToString("\n") { "${it.key}: ${it.value}" }) }
+    var timeout by rememberSaveable(initialName) { mutableStateOf(initial.timeout.toString()) }
+    var enabled by rememberSaveable(initialName) { mutableStateOf(initial.enabled) }
+    var error by remember(initialName) { mutableStateOf<String?>(null) }
     var testing by remember(initialName) { mutableStateOf(false) }
     var saving by remember(initialName) { mutableStateOf(false) }
     var testResult by remember(initialName) { mutableStateOf<McpServerSnapshot?>(null) }
     var confirmDelete by remember(initialName) { mutableStateOf(false) }
+    val externalChange = !isNew && currentRevision != acceptedRevision
 
     fun validationMessage(): String? {
         val finalName = if (isNew) name.trim() else initialName
@@ -738,7 +846,7 @@ private fun McpServerPage(
         }
         return when {
             finalName.isBlank() -> "Name is required"
-            url.isBlank() || !url.startsWith("https://") -> "Use an HTTPS MCP URL"
+            !isSafeMcpEndpoint(url.trim()) -> "Use HTTPS, or HTTP only for localhost"
             isNew && finalName in existingNames -> "A server named $finalName already exists"
             invalidHeader != null -> "Each header must use Name: Value"
             finalTimeout == null || finalTimeout !in 1_000L..60_000L -> "Timeout must be between 1000 and 60000 ms"
@@ -755,16 +863,35 @@ private fun McpServerPage(
         } else null
     }
 
-    val initialHeaders = initial.headers.entries.joinToString("\n") { "${it.key}: ${it.value}" }
+    val initialHeaders = baseline.headers.entries.joinToString("\n") { "${it.key}: ${it.value}" }
     val changed = if (isNew) {
-        name.isNotBlank() || url.isNotBlank() || headers.isNotBlank() || timeout != initial.timeout.toString() || enabled != initial.enabled
+        name.isNotBlank() || url.isNotBlank() || headers.isNotBlank() || timeout != baseline.timeout.toString() || enabled != baseline.enabled
     } else {
-        url != initial.url || headers != initialHeaders || timeout != initial.timeout.toString() || enabled != initial.enabled
+        url != baseline.url || headers != initialHeaders || timeout != baseline.timeout.toString() || enabled != baseline.enabled
     }
-    val canSubmit = validationMessage() == null && !testing && !saving
+    val canSubmit = validationMessage() == null && !testing && !saving && !externalChange
     LaunchedEffect(changed) { onDirtyChange(changed) }
     val shownSnapshot = testResult ?: snapshot.takeUnless { changed }
     Page(if (isNew) "Add MCP server" else initialName, onBack) {
+        if (externalChange) {
+            Text(
+                "This server changed elsewhere. Reload before saving.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = colors.error,
+            )
+            Spacer(Modifier.height(Spacing.xs))
+            PcButton("Reload latest", filled = false) {
+                baseline = initial
+                url = initial.url
+                headers = initial.headers.entries.joinToString("\n") { "${it.key}: ${it.value}" }
+                timeout = initial.timeout.toString()
+                enabled = initial.enabled
+                acceptedRevision = currentRevision
+                error = null
+                testResult = null
+            }
+            Spacer(Modifier.height(Spacing.s))
+        }
         when {
             testing -> Note("Testing this configuration…")
             shownSnapshot?.connected == true -> Note("Connected to ${shownSnapshot.serverTitle.ifBlank { shownSnapshot.serverName }.ifBlank { name }}")
@@ -787,7 +914,7 @@ private fun McpServerPage(
             minLines = 2,
             contentDescription = "HTTP headers",
         )
-        Note("One Name: Value header per line. Values are stored in PhoneCode's private app data.")
+        Note("One Name: Value header per line. Values are encrypted with Android Keystore.")
         McpFieldLabel("Connection timeout")
         PcField(
             timeout,
@@ -816,7 +943,7 @@ private fun McpServerPage(
                     draft()?.let { (draftName, server) ->
                         scope.launch {
                             saving = true
-                            vm.saveMcpServerAndWait(draftName, server).fold(
+                            vm.saveMcpServerAndWait(draftName, server, baseline.takeUnless { isNew }).fold(
                                 onSuccess = { onSaved() },
                                 onFailure = { error = it.message ?: "MCP configuration could not be saved" },
                             )
@@ -868,7 +995,11 @@ private fun McpServerPage(
 }
 
 @Composable
-private fun ConfirmDiscardDialog(onKeepEditing: () -> Unit, onDiscard: () -> Unit) {
+private fun ConfirmDiscardDialog(
+    message: String = "This server has unsaved changes.",
+    onKeepEditing: () -> Unit,
+    onDiscard: () -> Unit,
+) {
     Dialog(onDismissRequest = onKeepEditing) {
         Column(
             Modifier.fillMaxWidth().clip(MaterialTheme.shapes.extraLarge)
@@ -877,7 +1008,7 @@ private fun ConfirmDiscardDialog(onKeepEditing: () -> Unit, onDiscard: () -> Uni
         ) {
             Text("Discard changes?", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onBackground)
             Text(
-                "This server has unsaved changes.",
+                message,
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(top = Spacing.xs, bottom = Spacing.m),
@@ -885,6 +1016,34 @@ private fun ConfirmDiscardDialog(onKeepEditing: () -> Unit, onDiscard: () -> Uni
             PcButton("Keep editing", onClick = onKeepEditing)
             Spacer(Modifier.height(Spacing.xs))
             PcButton("Discard", filled = false, destructive = true, onClick = onDiscard)
+        }
+    }
+}
+
+@Composable
+private fun ConfirmActionDialog(
+    title: String,
+    message: String,
+    action: String,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    Dialog(onDismissRequest = onDismiss) {
+        Column(
+            Modifier.fillMaxWidth().clip(MaterialTheme.shapes.extraLarge)
+                .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                .padding(Spacing.m),
+        ) {
+            Text(title, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onBackground)
+            Text(
+                message,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = Spacing.xs, bottom = Spacing.m),
+            )
+            PcButton("Cancel", onClick = onDismiss)
+            Spacer(Modifier.height(Spacing.xs))
+            PcButton(action, filled = false, destructive = true, onClick = onConfirm)
         }
     }
 }
@@ -917,14 +1076,30 @@ private fun McpValueRow(label: String, value: String) {
 private enum class SkillFilter { ALL, ACTIVE, OFF, ISSUES }
 
 @Composable
-private fun SkillsPage(vm: ChatViewModel, onBack: () -> Unit) {
+private fun SkillsPage(vm: ChatViewModel, onBack: () -> Unit, onNestedBackActive: (Boolean) -> Unit) {
     val state by vm.state.collectAsStateWithLifecycle()
     var query by rememberSaveable { mutableStateOf("") }
     var filter by rememberSaveable { mutableStateOf(SkillFilter.ALL) }
     var selectedId by rememberSaveable { mutableStateOf<String?>(null) }
+    var editingId by rememberSaveable { mutableStateOf<String?>(null) }
+    var editorDirty by rememberSaveable { mutableStateOf(false) }
+    var confirmDiscard by rememberSaveable { mutableStateOf(false) }
     val colors = MaterialTheme.colorScheme
     val selectedSkill = state.skills.firstOrNull { it.id == selectedId }
-    val detailBackMotion = rememberPredictiveBackMotion(enabled = selectedSkill != null) { selectedId = null }
+    val editorSkill = state.skills.firstOrNull { it.id == editingId }
+    val nested = selectedSkill != null || editingId != null
+    val closeNested = {
+        if (editingId != null) {
+            if (editorDirty) confirmDiscard = true else editingId = null
+        } else {
+            selectedId = null
+        }
+    }
+    val detailBackMotion = rememberPredictiveBackMotion(enabled = nested && !confirmDiscard) { closeNested() }
+    DisposableEffect(nested) {
+        onNestedBackActive(nested)
+        onDispose { onNestedBackActive(false) }
+    }
     val filtered = remember(state.skills, query, filter) {
         state.skills.filter { skill ->
             val matchesQuery = query.isBlank() || skill.name.contains(query, true) ||
@@ -941,10 +1116,19 @@ private fun SkillsPage(vm: ChatViewModel, onBack: () -> Unit) {
     Box(Modifier.fillMaxSize()) {
     Box(
         Modifier.fillMaxSize().then(
-            if (selectedSkill != null) Modifier.clearAndSetSemantics {} else Modifier,
+            if (nested) Modifier.clearAndSetSemantics {} else Modifier,
         ),
     ) {
-    Page("Skills", onBack) {
+    Page(
+        "Skills",
+        onBack,
+        action = {
+            PcIconButton(Icons.Filled.Add, "New skill") {
+                editorDirty = false
+                editingId = NEW_SKILL_ID
+            }
+        },
+    ) {
         val active = state.skills.count { it.status == SkillStatus.ACTIVE }
         val issues = state.skills.count { it.status == SkillStatus.INVALID }
         Note("$active active · ${state.skills.size} discovered${if (issues > 0) " · $issues need attention" else ""}")
@@ -980,20 +1164,46 @@ private fun SkillsPage(vm: ChatViewModel, onBack: () -> Unit) {
                 }
             }
         }
-        Spacer(Modifier.height(Spacing.s))
+        Spacer(Modifier.height(Spacing.xs))
         Note("Skill files reload automatically. The agent can create and edit global or project skills with your permission.")
     }
     }
     selectedSkill?.let { skill ->
-        Box(Modifier.fillMaxSize().predictiveBackTransform(detailBackMotion).background(colors.background)) {
-            SkillDetailPage(vm, skill) { selectedId = null }
+        val modifier = if (editingId == null) Modifier.predictiveBackTransform(detailBackMotion) else Modifier
+        Box(Modifier.fillMaxSize().then(modifier).background(colors.background)) {
+            SkillDetailPage(
+                vm,
+                skill,
+                onEdit = { editorDirty = false; editingId = skill.id },
+                onBack = { selectedId = null },
+            )
         }
+    }
+    editingId?.let { id ->
+        Box(Modifier.fillMaxSize().predictiveBackTransform(detailBackMotion).background(colors.background)) {
+            SkillEditorPage(
+                vm = vm,
+                skillId = id.takeUnless { it == NEW_SKILL_ID },
+                skill = editorSkill,
+                isNew = id == NEW_SKILL_ID,
+                onDirtyChange = { editorDirty = it },
+                onBack = closeNested,
+                onSaved = { editorDirty = false; editingId = null },
+            )
+        }
+    }
+    if (confirmDiscard) {
+        ConfirmDiscardDialog(
+            message = "This skill has unsaved changes.",
+            onKeepEditing = { confirmDiscard = false },
+            onDiscard = { confirmDiscard = false; editorDirty = false; editingId = null },
+        )
     }
     }
 }
 
 @Composable
-private fun SkillDetailPage(vm: ChatViewModel, skill: ManagedSkill, onBack: () -> Unit) {
+private fun SkillDetailPage(vm: ChatViewModel, skill: ManagedSkill, onEdit: () -> Unit, onBack: () -> Unit) {
     val colors = MaterialTheme.colorScheme
     val manifest = skill.manifest
     var confirmDelete by remember(skill.id) { mutableStateOf(false) }
@@ -1040,6 +1250,8 @@ private fun SkillDetailPage(vm: ChatViewModel, skill: ManagedSkill, onBack: () -
             }
         }
         Spacer(Modifier.height(Spacing.l))
+        PcButton("Edit skill", filled = false, onClick = onEdit)
+        Spacer(Modifier.height(Spacing.xs))
         PcButton(if (confirmDelete) "Confirm delete" else "Delete skill", filled = false, destructive = true) {
             if (confirmDelete) {
                 vm.deleteSkill(skill.id)
@@ -1052,6 +1264,144 @@ private fun SkillDetailPage(vm: ChatViewModel, skill: ManagedSkill, onBack: () -
 }
 
 @Composable
+private fun SkillEditorPage(
+    vm: ChatViewModel,
+    skillId: String?,
+    skill: ManagedSkill?,
+    isNew: Boolean,
+    onDirtyChange: (Boolean) -> Unit,
+    onBack: () -> Unit,
+    onSaved: () -> Unit,
+) {
+    val scope = rememberCoroutineScope()
+    val editorKey = skillId ?: NEW_SKILL_ID
+    val initialName = skill?.name ?: skillId?.substringBeforeLast('/')?.substringAfterLast('/') ?: "new-skill"
+    val initialContent = remember(editorKey) { if (isNew) newSkillTemplate(initialName) else "" }
+    val clipboard = LocalClipboardManager.current
+    var name by rememberSaveable(editorKey) { mutableStateOf(initialName) }
+    var skillScope by rememberSaveable(editorKey) { mutableStateOf(skill?.scope ?: SkillScope.GLOBAL) }
+    var baselineRevision by rememberSaveable(editorKey) { mutableStateOf(if (isNew) revisionOf(initialContent) else "") }
+    var content by rememberSaveable(editorKey) { mutableStateOf(initialContent) }
+    var loaded by rememberSaveable(editorKey) { mutableStateOf(isNew) }
+    var baseline by remember(editorKey) { mutableStateOf(initialContent) }
+    var baselineReady by remember(editorKey) { mutableStateOf(isNew) }
+    var loading by remember(editorKey) { mutableStateOf(!isNew) }
+    var unavailable by remember(editorKey) { mutableStateOf(false) }
+    var conflict by remember(editorKey) { mutableStateOf(false) }
+    var saving by remember(editorKey) { mutableStateOf(false) }
+    var error by remember(editorKey) { mutableStateOf<String?>(null) }
+    LaunchedEffect(editorKey, skill) {
+        if (isNew) return@LaunchedEffect
+        loading = true
+        if (skill == null || skillId == null) {
+            unavailable = true
+            conflict = false
+            baselineReady = false
+            loading = false
+            return@LaunchedEffect
+        }
+        vm.readSkill(skillId).fold(
+            onSuccess = { latest ->
+                val latestRevision = revisionOf(latest)
+                unavailable = false
+                if (!loaded) {
+                    baseline = latest
+                    baselineRevision = latestRevision
+                    content = latest
+                    loaded = true
+                    baselineReady = true
+                    conflict = false
+                } else if (latestRevision == baselineRevision) {
+                    baseline = latest
+                    baselineReady = true
+                    conflict = false
+                } else {
+                    baselineReady = false
+                    conflict = true
+                }
+            },
+            onFailure = {
+                unavailable = true
+                baselineReady = false
+                error = it.message ?: "Skill could not be read"
+            },
+        )
+        loading = false
+    }
+    val changed = !loading && (content != baseline || isNew && (name != "new-skill" || skillScope != SkillScope.GLOBAL))
+    LaunchedEffect(changed, loading) { if (!loading) onDirtyChange(changed) }
+    Page(if (isNew) "New skill" else "Edit $name", onBack) {
+        if (isNew) {
+            PcSectionLabel("Identity")
+            McpFieldLabel("Skill name")
+            PcField(
+                name,
+                { value ->
+                    val next = value.lowercase().replace(Regex("[^a-z0-9-]"), "")
+                    content = content.replaceFirst(Regex("(?m)^name:.*$"), "name: $next")
+                    name = next
+                    error = null
+                },
+                "my-skill",
+                contentDescription = "Skill name",
+            )
+            PcGroup {
+                CheckRow("Global", skillScope == SkillScope.GLOBAL) { skillScope = SkillScope.GLOBAL }
+                CheckRow("Current project", skillScope == SkillScope.PROJECT) { skillScope = SkillScope.PROJECT }
+            }
+        } else {
+            Note("${skillScope.label()} · changes reload into the current session")
+        }
+        if (unavailable) {
+            Text(
+                "This skill was removed or renamed. Your draft is preserved here.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.error,
+            )
+            if (content.isNotEmpty()) {
+                Spacer(Modifier.height(Spacing.xs))
+                PcButton("Copy draft", filled = false) { clipboard.setText(AnnotatedString(content)) }
+            }
+        } else if (conflict) {
+            Text(
+                "This skill changed elsewhere. Your draft is preserved; reopen the editor to load the latest file.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
+        PcSectionLabel("SKILL.md")
+        PcField(
+            content,
+            { content = it; error = null },
+            if (loading) "Loading…" else "Skill instructions",
+            singleLine = false,
+            minLines = 12,
+            contentDescription = "Skill instructions",
+        )
+        error?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
+        Spacer(Modifier.height(Spacing.s))
+        PcButton(
+            if (saving) "Saving…" else "Save",
+            enabled = !loading && !saving && !unavailable && !conflict && baselineReady && name.isNotBlank() && content.isNotBlank(),
+        ) {
+            scope.launch {
+                saving = true
+                vm.saveSkillAndWait(skillId, skillScope, name, content, baseline.takeUnless { isNew }).fold(
+                    onSuccess = { onSaved() },
+                    onFailure = { error = it.message ?: "Skill could not be saved" },
+                )
+                saving = false
+            }
+        }
+    }
+}
+
+private fun newSkillTemplate(name: String): String =
+    "---\nname: $name\ndescription: Describe when the agent should use this skill.\nlicense: Apache-2.0\n---\n\nWrite concise, actionable instructions here."
+
+private const val NEW_SKILL_ID = "__phonecode_new_skill__"
+
+@Composable
 private fun SkillFilters(selected: SkillFilter, onSelect: (SkillFilter) -> Unit) {
     val colors = MaterialTheme.colorScheme
     Row(
@@ -1060,12 +1410,15 @@ private fun SkillFilters(selected: SkillFilter, onSelect: (SkillFilter) -> Unit)
     ) {
         SkillFilter.entries.forEach { filter ->
             val active = filter == selected
+            val interaction = remember(filter) { MutableInteractionSource() }
             Box(
-                Modifier.weight(1f).clip(MaterialTheme.shapes.large)
+                Modifier.weight(1f).heightIn(min = Spacing.touchTarget)
+                    .pressFeedback(interaction, pressedScale = 0.98f)
+                    .clip(MaterialTheme.shapes.large)
                     .background(if (active) colors.primary else colors.surfaceContainerHigh)
                     .semantics { this.selected = active; role = Role.Tab }
-                    .clickable { onSelect(filter) }
-                    .padding(vertical = 8.dp),
+                    .clickable(interactionSource = interaction, indication = ripple(), role = Role.Tab) { onSelect(filter) }
+                    .padding(horizontal = 8.dp, vertical = 8.dp),
                 contentAlignment = Alignment.Center,
             ) {
                 Text(filter.shortLabel(), style = MaterialTheme.typography.labelMedium, color = if (active) colors.onPrimary else colors.onBackground)
@@ -1190,7 +1543,7 @@ private fun ExportPage(vm: ChatViewModel, settingsVm: SettingsViewModel, onBack:
     }
     Page("Export & import", onBack) {
         PcSectionLabel("Your data")
-        Note("Exports contain chats and settings, are not encrypted, and never include credentials.")
+        Note("Exports are not encrypted. Saved provider and sign-in credentials are excluded, but chats and tool activity may contain sensitive content.")
         Spacer(Modifier.height(10.dp))
         PcButton("Export chats & settings", filled = false) { exporter.launch("phonecode-backup-$stamp.zip") }
         Spacer(Modifier.height(10.dp))
@@ -1267,15 +1620,17 @@ private fun DocPage(title: String, assetName: String, onBack: () -> Unit) {
 @Composable
 private fun CustomProviderDialog(
     existingIds: Set<String>,
-    onSave: (String, CustomProvider) -> Unit,
+    onSave: suspend (String, CustomProvider) -> Result<Unit>,
     onDismiss: () -> Unit,
 ) {
     val colors = MaterialTheme.colorScheme
-    var name by remember { mutableStateOf("") }
-    var baseUrl by remember { mutableStateOf("") }
-    var anthropicFormat by remember { mutableStateOf(false) }
-    var modelsText by remember { mutableStateOf("") }
-    var error by remember { mutableStateOf<String?>(null) }
+    var name by rememberSaveable { mutableStateOf("") }
+    var baseUrl by rememberSaveable { mutableStateOf("") }
+    var anthropicFormat by rememberSaveable { mutableStateOf(false) }
+    var modelsText by rememberSaveable { mutableStateOf("") }
+    var error by rememberSaveable { mutableStateOf<String?>(null) }
+    var saving by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
     Dialog(onDismissRequest = onDismiss) {
         Column(
             Modifier.fillMaxWidth().shadow(24.dp, MaterialTheme.shapes.extraLarge, clip = false)
@@ -1300,26 +1655,29 @@ private fun CustomProviderDialog(
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Spacing.xs)) {
                 Box(Modifier.weight(1f)) { PcButton("Cancel", filled = false, onClick = onDismiss) }
                 Box(Modifier.weight(1f)) {
-                    PcButton("Save") {
+                    PcButton(if (saving) "Saving…" else "Save", enabled = !saving) {
                         val id = name.trim().lowercase().replace(Regex("[^a-z0-9]+"), "-").trim('-')
                         val models = modelsText.lines().map { it.trim() }.filter { it.isNotEmpty() }
                         when {
                             name.isBlank() -> error = "Name is required"
                             id.isBlank() -> error = "Name needs at least one letter or digit"
+                            !isSafeCustomProviderId(id) -> error = "Use a shorter, unique provider name"
                             id in existingIds -> error = "\"$id\" already exists"
-                            !baseUrl.trim().startsWith("http") -> error = "Base URL must start with http(s)://"
+                            !isSafeProviderEndpoint(baseUrl.trim()) -> error = "Use HTTPS, or HTTP only for localhost"
                             models.isEmpty() -> error = "Add at least one model id"
                             else -> {
-                                onSave(
-                                    id,
-                                    CustomProvider(
+                                saving = true
+                                scope.launch {
+                                    onSave(id, CustomProvider(
                                         name = name.trim(),
                                         baseUrl = baseUrl.trim().trimEnd('/'),
                                         format = if (anthropicFormat) "anthropic" else "openai",
                                         models = models.associateWith { CustomModel(name = it) },
-                                    ),
-                                )
-                                onDismiss()
+                                    )).onSuccess { onDismiss() }.onFailure { failure ->
+                                        error = failure.message ?: "Custom provider could not be saved"
+                                    }
+                                    saving = false
+                                }
                             }
                         }
                     }

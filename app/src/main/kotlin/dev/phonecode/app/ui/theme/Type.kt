@@ -39,19 +39,3 @@ val PhoneTypography = Typography(
     labelMedium = TextStyle(fontFamily = InterFamily, fontWeight = FontWeight.Normal, fontSize = 13.sp, lineHeight = 16.sp, letterSpacing = 0.sp),
     labelSmall = TextStyle(fontFamily = InterFamily, fontWeight = FontWeight.Normal, fontSize = 12.sp, lineHeight = 15.sp, letterSpacing = 0.sp),
 )
-
-/** Legacy JetBrains-Mono role scale - still referenced by screens not yet migrated to the new design. */
-object PcType {
-    val appWordmark = TextStyle(fontFamily = PcMono, fontWeight = FontWeight.Bold, fontSize = 16.sp, lineHeight = 20.sp, letterSpacing = (-0.4).sp)
-    val titleLarge = TextStyle(fontFamily = PcMono, fontWeight = FontWeight.Bold, fontSize = 19.sp, lineHeight = 24.sp, letterSpacing = (-0.4).sp)
-    val display = TextStyle(fontFamily = PcMono, fontWeight = FontWeight.Medium, fontSize = 17.sp, lineHeight = 23.sp, letterSpacing = (-0.3).sp)
-    val titleMedium = TextStyle(fontFamily = PcMono, fontWeight = FontWeight.Medium, fontSize = 14.sp, lineHeight = 19.sp)
-    val bodyLarge = TextStyle(fontFamily = PcMono, fontWeight = FontWeight.Normal, fontSize = 14.sp, lineHeight = 21.sp)
-    val bodyMedium = TextStyle(fontFamily = PcMono, fontWeight = FontWeight.Normal, fontSize = 13.sp, lineHeight = 18.sp)
-    val reasoning = TextStyle(fontFamily = PcMono, fontWeight = FontWeight.Normal, fontSize = 12.sp, lineHeight = 18.sp)
-    val label = TextStyle(fontFamily = PcMono, fontWeight = FontWeight.Medium, fontSize = 12.sp, lineHeight = 16.sp)
-    val labelSmall = TextStyle(fontFamily = PcMono, fontWeight = FontWeight.Normal, fontSize = 11.sp, lineHeight = 14.sp, letterSpacing = 0.2.sp)
-    val sectionEyebrow = TextStyle(fontFamily = PcMono, fontWeight = FontWeight.Medium, fontSize = 11.sp, lineHeight = 14.sp, letterSpacing = 1.4.sp)
-    val code = TextStyle(fontFamily = PcMono, fontWeight = FontWeight.Normal, fontSize = 13.sp, lineHeight = 20.sp)
-    val caption = TextStyle(fontFamily = PcMono, fontWeight = FontWeight.Normal, fontSize = 10.sp, lineHeight = 14.sp, letterSpacing = 0.3.sp)
-}

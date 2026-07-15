@@ -5,8 +5,6 @@ import dev.phonecode.tools.ToolContext
 import dev.phonecode.tools.ToolResult
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.add
-import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonObject
@@ -43,8 +41,13 @@ class SkillTool(private val skills: List<SkillManifest>) : Tool {
                 put("type", "string")
                 put("description", "An optional relative text file from the skill directory")
             }
+            putJsonObject("query") {
+                put("type", "string")
+                put("description", "Search installed skill names and descriptions when name is omitted")
+            }
+            putJsonObject("offset") { put("type", "integer") }
+            putJsonObject("limit") { put("type", "integer") }
         }
-        put("required", buildJsonArray { add("name") })
         put("additionalProperties", false)
     }
 
@@ -52,15 +55,29 @@ class SkillTool(private val skills: List<SkillManifest>) : Tool {
 
     override suspend fun execute(args: JsonObject, context: ToolContext): ToolResult {
         val name = (args["name"] as? JsonPrimitive)?.takeIf { it.isString }?.content
-            ?: return ToolResult("skill: missing 'name'", isError = true)
+            ?: return listSkills(args)
         val skill = byName[name] ?: return ToolResult(
-            "skill: unknown skill '$name'. Available: ${skills.joinToString(", ") { it.name }.ifEmpty { "(none)" }}",
+            "skill: unknown skill '$name'. Search installed skills by calling skill with query instead of name.",
             isError = true,
         )
         val path = (args["path"] as? JsonPrimitive)?.takeIf { it.isString }?.content
         if (path != null) return loadResource(skill, path)
         val location = skill.location.takeIf { it.isNotBlank() }?.let { " location=\"${escape(it)}\"" }.orEmpty()
         return ToolResult("<skill_content name=\"${escape(skill.name)}\"$location>\n${skill.body}\n</skill_content>")
+    }
+
+    private fun listSkills(args: JsonObject): ToolResult {
+        val query = (args["query"] as? JsonPrimitive)?.content.orEmpty().trim()
+        val offset = (args["offset"] as? JsonPrimitive)?.content?.toIntOrNull()?.coerceAtLeast(0) ?: 0
+        val limit = (args["limit"] as? JsonPrimitive)?.content?.toIntOrNull()?.coerceIn(1, 50) ?: 20
+        val matching = skills.filter {
+            query.isEmpty() || it.name.contains(query, true) || it.description.contains(query, true)
+        }
+        val page = matching.drop(offset).take(limit)
+        if (page.isEmpty()) return ToolResult(if (query.isEmpty()) "(no installed skills)" else "No skills match '$query'.")
+        val next = offset + page.size
+        val more = if (next < matching.size) "\n[${matching.size - next} more. Continue with offset=$next.]" else ""
+        return ToolResult(page.joinToString("\n") { "- ${it.name}: ${it.description}" } + more)
     }
 
     private fun loadResource(skill: SkillManifest, path: String): ToolResult {

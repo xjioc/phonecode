@@ -15,6 +15,7 @@ local.properties
 *.keystore
 !gradle-wrapper.jar
 /.playwright-mcp/
+/.scratch/
 /opencode-home.png
 /_oc_research/
 /_research/

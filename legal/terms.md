@@ -1,6 +1,6 @@
 # PhoneCode Terms of Service
 
-_Last updated: 13 July 2026_
+_Last updated: 15 July 2026_
 
 These Terms govern your use of PhoneCode, an on-device AI coding client published by Deyan Todorov. By installing or using PhoneCode, you agree to these Terms. If you do not agree, do not use the app.
 

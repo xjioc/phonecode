@@ -8,6 +8,7 @@ import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -46,7 +47,7 @@ class McpClientTest {
         val tools = McpClient("My Weather!", config(), http).connect()
 
         assertEquals(1, tools.size)
-        assertEquals("My_Weather__get_weather", tools[0].name)
+        assertEquals(mcpToolName("My Weather!", "get_weather"), tools[0].name)
         assertEquals("Get weather", tools[0].description)
 
         val initialize = server.takeRequest()
@@ -58,6 +59,32 @@ class McpClientTest {
         assertEquals("2025-11-25", initialized.getHeader("MCP-Protocol-Version"))
         assertEquals("sess-1", list.getHeader("Mcp-Session-Id"))
         assertEquals("2025-11-25", list.getHeader("MCP-Protocol-Version"))
+    }
+
+    @Test fun longToolNamesStayWithinProviderLimitsAndRemainDistinct() {
+        val serverName = "server-" + "x".repeat(100)
+        val first = mcpToolName(serverName, "tool-" + "a".repeat(120))
+        val second = mcpToolName(serverName, "tool-" + "a".repeat(119) + "b")
+
+        assertEquals(64, first.length)
+        assertTrue(first.matches(Regex("[a-zA-Z0-9_-]+")))
+        assertEquals(first, mcpToolName(serverName, "tool-" + "a".repeat(120)))
+        assertNotEquals(first, second)
+    }
+
+    @Test fun shortSanitizedAndNamespaceCollisionsRemainDistinct() {
+        val punctuation = mcpToolName("weather.api", "read")
+        val whitespace = mcpToolName("weather api", "read")
+        val splitAtServer = mcpToolName("weather_api", "read")
+        val splitAtTool = mcpToolName("weather", "api_read")
+        val dottedTool = mcpToolName("weather", "read.hourly")
+        val spacedTool = mcpToolName("weather", "read hourly")
+
+        assertNotEquals(punctuation, whitespace)
+        assertNotEquals(splitAtServer, splitAtTool)
+        assertNotEquals(dottedTool, spacedTool)
+        assertTrue(listOf(punctuation, whitespace, splitAtServer, splitAtTool, dottedTool, spacedTool).all { it.length <= 64 })
+        assertEquals(punctuation, mcpToolName("weather.api", "read"))
     }
 
     @Test fun probeExposesNegotiatedCapabilitiesAndServerIdentity() = runBlocking {
@@ -142,6 +169,29 @@ class McpClientTest {
 
         assertTrue(!snapshot.connected)
         assertTrue(snapshot.error.contains("HTTP 401"))
+    }
+
+    @Test fun configuredHeadersAreNeverForwardedAcrossRedirects() = runBlocking {
+        val redirected = MockWebServer()
+        redirected.start()
+        try {
+            server.enqueue(
+                MockResponse()
+                    .setResponseCode(302)
+                    .setHeader("Location", redirected.url("/capture")),
+            )
+            val config = McpServerConfig(
+                url = server.url("/mcp").toString(),
+                headers = mapOf("X-API-Key" to "secret"),
+            )
+
+            val snapshot = probeMcpServer("private", config, http)
+
+            assertTrue(!snapshot.connected)
+            assertEquals(0, redirected.requestCount)
+        } finally {
+            redirected.shutdown()
+        }
     }
 
     @Test fun callToolReturnsStructuredContent() = runBlocking {

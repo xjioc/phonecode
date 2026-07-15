@@ -16,8 +16,10 @@ import dev.phonecode.agent.TurnSettings
 import dev.phonecode.app.auth.CodexAuth
 import dev.phonecode.app.auth.GitHubAuth
 import dev.phonecode.app.PhoneCodeApplication
+import dev.phonecode.app.data.AppSettings
 import dev.phonecode.app.data.AppSettingsStore
 import dev.phonecode.app.data.CustomProviderRepository
+import dev.phonecode.app.data.customProviderSecretName
 import dev.phonecode.app.data.FileCatalogCache
 import dev.phonecode.app.data.McpSkillRepository
 import dev.phonecode.app.data.ManagedSkill
@@ -26,6 +28,8 @@ import dev.phonecode.app.data.ModelPrefsStore
 import dev.phonecode.app.data.PersistedSession
 import dev.phonecode.app.data.Project
 import dev.phonecode.app.data.ProjectStore
+import dev.phonecode.app.data.ProvidersConfigLoad
+import dev.phonecode.app.data.InvalidProvidersConfigException
 import dev.phonecode.app.data.SecureKeyStore
 import dev.phonecode.app.data.SessionMeta
 import dev.phonecode.app.data.SessionStore
@@ -98,7 +102,10 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.File
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
 import java.util.concurrent.TimeUnit
 
@@ -111,12 +118,35 @@ data class PermissionRequest(val tool: String, val summary: String)
 data class QuestionRequest(val questions: List<UserQuestion>)
 data class RetryState(val attempt: Int, val message: String)
 data class AiReportSubmission(val accepted: Boolean, val reference: String? = null, val error: String? = null)
+data class AgentToolInfo(val name: String, val description: String, val source: String, val access: String)
+
+private data class BackupRestore(
+    val count: Int,
+    val settings: AppSettings,
+    val session: PersistedSession,
+    val messages: List<ChatMessage>,
+    val favourites: Set<String>,
+    val hiddenModels: Set<String>,
+    val disabledProviders: Set<String>,
+    val sessions: List<SessionMeta>,
+    val projects: List<Project>,
+)
+
+private data class StreamSnapshot(val text: String, val reasoning: String)
+
+private data class RecoveredWorkspace(val source: File, val target: File, val relativePath: String)
 
 sealed interface ChatLine {
     data class User(val text: String, val images: List<MessagePart.Image> = emptyList()) : ChatLine
     data class Assistant(val text: String) : ChatLine
     data class Reasoning(val text: String) : ChatLine
-    data class ToolActivity(val id: String, val name: String, val status: ToolStatus, val detail: String) : ChatLine
+    data class ToolActivity(
+        val id: String,
+        val name: String,
+        val status: ToolStatus,
+        val detail: String,
+        val input: String = detail,
+    ) : ChatLine
 }
 
 data class ChatUiState(
@@ -124,6 +154,7 @@ data class ChatUiState(
     val streaming: String = "",
     val streamingReasoning: String = "",
     val isRunning: Boolean = false,
+    val sessionLoading: Boolean = false,
     val queued: List<String> = emptyList(), // messages sent while a turn runs, awaiting pickup by the agent
     val models: List<ModelOption> = builtInModels(),
     val selected: ModelOption? = builtInModels().firstOrNull(),
@@ -139,6 +170,7 @@ data class ChatUiState(
     val mcpToolCount: Int = 0,
     val mcpConnecting: Set<String> = emptySet(),
     val mcpConfigError: String? = null,
+    val providerConfigError: String? = null,
     val skills: List<ManagedSkill> = emptyList(),
     val sessions: List<SessionMeta> = emptyList(),
     // Bumped whenever `lines` is REWOUND (redo) - the chat list keys its index-cache remembers
@@ -197,7 +229,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     private val turnLease = AtomicReference<String?>(null)
     private val todoStore = TodoStore()
     private val configDir = File(app.filesDir, "config")
-    private val repo = McpSkillRepository(configDir)
+    private val repo = McpSkillRepository(configDir, keyStore)
     private val customProviders = CustomProviderRepository(configDir)
     private val sharedFolderStore = SharedFolderStore(File(app.filesDir, "shared_folders.json"))
     private val sharedFileAccess = AndroidSharedFileAccess(app, sharedFolderStore)
@@ -262,24 +294,42 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             ?: if (it.providerId == "codex") dev.phonecode.provider.catalog.Limit(context = 372_000, output = 128_000) else null
     }
 
-    private val _state = MutableStateFlow(ChatUiState())
+    private val appSettings = AppSettingsStore(File(app.filesDir, "app_settings.json"))
+    private val startupSettings = appSettings.load()
+    private val startupMode = runCatching { AgentMode.valueOf(startupSettings.defaultMode) }.getOrDefault(AgentMode.BUILD)
+    private val _state = MutableStateFlow(
+        ChatUiState(
+            sessionLoading = true,
+            agentMode = startupMode,
+            autoAccept = startupSettings.autoAccept,
+        ),
+    )
     val state: StateFlow<ChatUiState> = _state.asStateFlow()
 
     private val sessionStore = SessionStore(File(app.filesDir, "sessions"))
     private val modelPrefs = ModelPrefsStore(File(app.filesDir, "model_prefs.json"))
     private val projectStore = ProjectStore(File(app.filesDir, "projects.json"))
-    private val appSettings = AppSettingsStore(File(app.filesDir, "app_settings.json"))
-    @Volatile private var sessionId: String = "session-" + System.currentTimeMillis()
+    @Volatile private var sessionId: String = newSessionId()
     @Volatile private var currentProjectId: String? = null
     @Volatile private var history: List<ChatMessage> = emptyList()
+    private val streamBufferLock = Any()
+    private val streamingTextBuffer = StringBuilder()
+    private val streamingReasoningBuffer = StringBuilder()
+    private var lastStreamFlushAt = 0L
     @Volatile private var generation = 0
+    private val sessionWriteOrder = AtomicLong()
     private var job: Job? = null
+    private var sessionSwitchJob: Job? = null
+    @Volatile private var loadingSessionId: String? = null
+    @Volatile private var sessionSelection = 0
     private var modelRefreshJob: Job? = null
     private var mcpReconnectJob: Job? = null
     private val runtimeReloadMutex = Mutex()
     private val mcpReloadMutex = Mutex()
+    private val metadataMutationMutex = Mutex()
     @Volatile private var lastMcpFingerprint: String? = null
     @Volatile private var lastSkillsFingerprint: String? = null
+    @Volatile private var lastProvidersFingerprint: String? = null
     private val configHotReload = ConfigHotReloadObserver(
         scope = viewModelScope,
         directories = { repo.watchedDirectories(workspace) },
@@ -297,19 +347,20 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
 
     init {
         configDir.mkdirs()
+        repo.seedBundledSkills(app.assets)
+        refreshSkillsNow()
         refreshSessions()
         foregroundLeases.registerStopHandler("processes", processManager::stopAll)
         foregroundLeases.registerStopHandler("turn") { cancel() }
         viewModelScope.launch(Dispatchers.IO) { userland.ensureLinux() }
         viewModelScope.launch(Dispatchers.IO) {
-            val saved = appSettings.load()
             _state.update {
                 it.copy(
                     favourites = modelPrefs.favourites(),
                     hiddenModels = modelPrefs.hiddenModels(),
                     disabledProviders = modelPrefs.disabledProviders(),
-                    autoAccept = saved.autoAccept,
-                    agentMode = runCatching { AgentMode.valueOf(saved.defaultMode) }.getOrDefault(AgentMode.BUILD),
+                    autoAccept = startupSettings.autoAccept,
+                    agentMode = startupMode,
                     codexConnected = keyStore.get("codex.access") != null,
                     githubLogin = keyStore.get("github.login"),
                     currentSessionId = sessionId,
@@ -320,38 +371,42 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         reloadProviders()
         // The agent's todo list (a StateFlow) drives the on-screen checklist directly.
         viewModelScope.launch { todoStore.items.collect { todos -> _state.update { it.copy(todos = todos) } } }
-        // Restore the most recent conversation SYNCHRONOUSLY, before the UI can send. The old restore ran
-        // on a background coroutine and bailed once the user touched the screen, so reopening the app
-        // (Android kills it aggressively) and sending right away started a cold session and orphaned the
-        // real one - "a new instance with no context" on every relaunch. loadLatest reads a single file.
-        // ponytail: one small main-thread read at startup; if a huge transcript ever hitches launch, move
-        // the body off-thread and have send() await it.
-        runCatching {
-            sessionStore.loadLatest()?.let { latest ->
+        viewModelScope.launch(Dispatchers.IO) {
+            val latest = runCatching {
+                startupSettings.activeSessionId?.let(sessionStore::load) ?: sessionStore.loadLatest()
+            }.getOrNull()
+            if (latest == null) {
+                _state.update { it.copy(sessionLoading = false, currentSessionId = sessionId) }
+            } else {
                 val interrupted = latest.activeTurn
-                sessionId = latest.id
-                setActiveProject(latest.projectId)
-                history = latest.messages.map { it.toDomain() }.let {
+                val restored = latest.messages.map { it.toDomain() }.let {
                     if (interrupted) repairInterruptedHistory(it) else it
                 }
-                _state.update {
-                    it.copy(
-                        lines = history.toChatLines(),
-                        currentSessionId = latest.id,
-                        currentProjectId = latest.projectId,
-                        error = if (interrupted) TURN_INTERRUPTED_MESSAGE else it.error,
-                        interruptedTurn = interrupted,
-                    )
+                val lines = restored.toChatLines()
+                withContext(Dispatchers.Main.immediate) {
+                    sessionId = latest.id
+                    val activeProjectId = setActiveProject(latest.projectId)
+                    history = restored
+                    todoStore.replace(latest.todos)
+                    _state.update {
+                        it.copy(
+                            lines = lines,
+                            currentSessionId = latest.id,
+                            currentProjectId = activeProjectId,
+                            error = if (interrupted) TURN_INTERRUPTED_MESSAGE else it.error,
+                            interruptedTurn = interrupted,
+                            sessionLoading = false,
+                        )
+                    }
                 }
                 if (interrupted) {
-                    sessionStore.save(latest.copy(messages = history.map { it.toPersisted() }, activeTurn = false))
+                    sessionStore.checkpoint(latest.copy(messages = restored.map { it.toPersisted() }, activeTurn = false))
                 }
+                appSettings.update { it.copy(activeSessionId = latest.id) }
             }
         }
         // Load MCP config + discover skills, then connect remote MCP servers and fold their tools in.
         viewModelScope.launch(Dispatchers.IO) {
-            repo.seedBundledSkills(app.assets) // built-in skills (e.g. diagrams) on first run; user can edit/delete after
-            refreshSkillsNow()
             reconnectMcpNow(force = true)
             configHotReload.restart()
         }
@@ -365,7 +420,10 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         val refreshCodex = !keyStore.get("codex.access").isNullOrBlank() &&
             (forceRefresh || now - lastCodexRefreshAt >= CODEX_REFRESH_TTL_MS)
         if (!refreshCatalog && !refreshCodex) return
-        if (modelRefreshJob?.isActive == true) return
+        if (modelRefreshJob?.isActive == true) {
+            if (!forceRefresh) return
+            modelRefreshJob?.cancel()
+        }
         modelRefreshJob = viewModelScope.launch(Dispatchers.IO) {
             if (refreshCatalog) {
                 runCatching { catalogLoader.load(forceRefresh) }.getOrNull()?.let {
@@ -386,7 +444,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                     runCatching {
                         codexModelsClient.fetch(preset, accessToken, CodexCompatibility.CLIENT_VERSION)
                     }.getOrNull()
-                        ?.filter { it.visibility == "list" && it.supportedInApi }
+                        ?.let(::visibleCodexModels)
                         ?.takeIf { it.isNotEmpty() }
                         ?.let {
                             codexModelMetadata = it.associateBy(CodexModelInfo::slug)
@@ -408,7 +466,10 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             val merged = options + custom
             val current = state.selected
             val recentKey = modelPrefs.recents().firstOrNull()
-            val resolved = merged.firstOrNull { modelKey(it) == recentKey }
+            val resolved = merged.firstOrNull { modelKey(it) == recentKey && providerConfigured(it.providerId) }
+                ?: merged.firstOrNull { it.providerId == current?.providerId && it.modelId == current.modelId && providerConfigured(it.providerId) }
+                ?: merged.firstOrNull { providerConfigured(it.providerId) }
+                ?: merged.firstOrNull { modelKey(it) == recentKey }
                 ?: merged.firstOrNull { it.providerId == current?.providerId && it.modelId == current.modelId }
                 ?: current?.providerId?.let { id -> merged.firstOrNull { it.providerId == id } }
                 ?: merged.first()
@@ -457,17 +518,59 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun modelKey(o: ModelOption) = "${o.providerId}/${o.modelId}"
 
-    /** The workspace folder for [projectId] (null = the default workspace for unsorted chats). */
-    private fun workspaceFor(projectId: String?): File =
-        File(workspacesRoot, projectId ?: "default").apply { mkdirs() }
+    private fun workspacePathFor(projectId: String?): File {
+        val root = workspacesRoot.canonicalFile.apply { mkdirs() }
+        val directory = File(root, projectId ?: "default").canonicalFile
+        require(directory.parentFile == root) { "Project workspace is outside the workspace root" }
+        return directory
+    }
+
+    private fun workspaceFor(projectId: String?): File = workspacePathFor(projectId).apply { mkdirs() }
+
+    private suspend fun recoverProjectWorkspace(project: Project): RecoveredWorkspace? {
+        val source = workspacePathFor(project.id)
+        processManager.stopWorkspace(source.absolutePath)
+        if (!source.isDirectory || source.list().isNullOrEmpty()) {
+            source.delete()
+            return null
+        }
+        val defaultWorkspace = workspaceFor(null)
+        val recoveredRoot = File(defaultWorkspace, "Recovered projects").apply { mkdirs() }
+        val safeName = project.name.map { char ->
+            if (char.isLetterOrDigit() || char == ' ' || char == '-' || char == '_' || char == '.') char else '_'
+        }.joinToString("").trim().take(60).ifBlank { "Project" }
+        val baseName = "$safeName (${project.id.takeLast(8)})"
+        var target = File(recoveredRoot, baseName)
+        var suffix = 2
+        while (target.exists()) target = File(recoveredRoot, "$baseName $suffix").also { suffix++ }
+        runCatching {
+            Files.move(source.toPath(), target.toPath(), StandardCopyOption.ATOMIC_MOVE)
+        }.getOrElse {
+            Files.move(source.toPath(), target.toPath())
+        }
+        return RecoveredWorkspace(source, target, target.relativeTo(defaultWorkspace).path)
+    }
+
+    private fun restoreProjectWorkspace(recovered: RecoveredWorkspace) {
+        if (!recovered.target.exists()) return
+        recovered.source.parentFile?.mkdirs()
+        check(!recovered.source.exists() || recovered.source.delete()) { "Project workspace recovery destination is not empty" }
+        runCatching {
+            Files.move(recovered.target.toPath(), recovered.source.toPath(), StandardCopyOption.ATOMIC_MOVE)
+        }.getOrElse {
+            Files.move(recovered.target.toPath(), recovered.source.toPath())
+        }
+    }
 
     /** Switch the active project: the workspace (files + git repo) follows the current chat's project. */
-    private fun setActiveProject(projectId: String?) {
-        currentProjectId = projectId
-        workspace = workspaceFor(projectId)
+    private fun setActiveProject(projectId: String?): String? {
+        val safeProjectId = projectId?.takeIf(PROJECT_ID::matches)
+        currentProjectId = safeProjectId
+        workspace = workspaceFor(safeProjectId)
         lastSkillsFingerprint = null
         configHotReload.restart()
         refreshSkills()
+        return safeProjectId
     }
 
     /**
@@ -475,17 +578,18 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
      * moves the workspace onto its own branch so the agent's changes stay isolated from main.
      * Best-effort - a failure (no repo, detached head) must never block the send.
      */
-    private fun autoBranchIfEnabled(dir: File, taskSessionId: String = sessionId) {
-        if (!appSettings.load().gitAutoBranch) return
-        if (!File(dir, ".git").exists()) return
-        runCatching {
+    private fun autoBranchIfEnabled(dir: File, taskSessionId: String = sessionId): Boolean {
+        if (!appSettings.load().gitAutoBranch) return false
+        if (!File(dir, ".git").exists()) return false
+        return runCatching {
             openGit(dir).use { git ->
                 val branch = "task-" + taskSessionId.removePrefix("session-")
                 if (git.repository.branch != branch) {
-                    git.checkout().setName(branch).setCreateBranch(true).call()
+                    git.checkout().setName(branch).setCreateBranch(git.repository.findRef(branch) == null).call()
                 }
+                true
             }
-        }
+        }.getOrDefault(false)
     }
 
     /** Git HTTPS credentials (username + token) from the keystore, if both are set. */
@@ -556,45 +660,70 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** Reload agent-defined custom providers/models from providers.json into the picker + provider map. */
     fun reloadProviders() {
-        viewModelScope.launch(Dispatchers.IO) {
-            val cfg = customProviders.load()
-            customPresets = cfg.provider.mapValues { (id, p) -> p.toPreset(id) }
-            customLimits = cfg.provider.flatMap { (pid, p) ->
-                p.models.mapNotNull { (mid, m) -> m.context?.let { "$pid/$mid" to it } }
-            }.toMap()
-            val customOptions = cfg.provider.flatMap { (pid, p) ->
-                p.models.map { (mid, m) -> ModelOption(pid, mid, m.name.ifBlank { mid }) }
+        viewModelScope.launch(Dispatchers.IO) { reloadProvidersNow() }
+    }
+
+    private fun reloadProvidersNow(): Result<Unit> {
+        val fingerprint = runCatching { customProviders.fingerprint() }.getOrDefault("unreadable")
+        var warning: String? = null
+        val cfg = when (val loaded = customProviders.loadState()) {
+            is ProvidersConfigLoad.Ready -> loaded.config.also { warning = loaded.warning }
+            is ProvidersConfigLoad.Invalid -> {
+                lastProvidersFingerprint = fingerprint
+                _state.update { it.copy(providerConfigError = loaded.message) }
+                return Result.failure(InvalidProvidersConfigException(loaded.message))
             }
-            if (customOptions.isNotEmpty()) {
-                _state.update { s ->
-                    val existing = s.models.map { "${it.providerId}/${it.modelId}" }.toSet()
-                    s.copy(models = s.models + customOptions.filterNot { "${it.providerId}/${it.modelId}" in existing })
+        }
+        return runCatching {
+            cfg.provider.keys.forEach { id ->
+                val scoped = customProviderSecretName(id)
+                val legacy = keyStore.get(id)
+                if (keyStore.get(scoped).isNullOrBlank() && !legacy.isNullOrBlank()) {
+                    keyStore.put(scoped, legacy)
+                    keyStore.put(id, "")
                 }
             }
+            customPresets = cfg.provider.mapValues { (id, provider) -> provider.toPreset(id) }
+            customLimits = cfg.provider.flatMap { (providerId, provider) ->
+                provider.models.mapNotNull { (modelId, model) -> model.context?.let { "$providerId/$modelId" to it } }
+            }.toMap()
+            val customOptions = cfg.provider.flatMap { (providerId, provider) ->
+                provider.models.map { (modelId, model) -> ModelOption(providerId, modelId, model.name.ifBlank { modelId }) }
+            }
+            applyModelOptions(catalogToOptions(catalog) + customOptions)
+            lastProvidersFingerprint = fingerprint
+            _state.update { it.copy(providerConfigError = warning) }
+        }.onFailure { error ->
+            _state.update { it.copy(providerConfigError = error.message ?: "Provider configuration could not be loaded") }
         }
     }
     /** True for user/agent-defined providers (they get a "Remove" action; presets don't). */
     fun isCustomProvider(id: String): Boolean = id in customPresets
 
-    /** Save a user-defined provider from the settings form into providers.json, then fold it in. */
-    fun saveCustomProvider(id: String, provider: dev.phonecode.app.data.CustomProvider) {
-        viewModelScope.launch(Dispatchers.IO) {
-            val cfg = customProviders.load()
-            customProviders.save(cfg.copy(provider = cfg.provider + (id to provider)))
-            reloadProviders()
+    suspend fun saveCustomProvider(id: String, provider: dev.phonecode.app.data.CustomProvider): Result<Unit> =
+        withContext(Dispatchers.IO) {
+            runCatching {
+                val cfg = customProviders.load()
+                customProviders.save(cfg.copy(provider = cfg.provider + (id to provider)))
+                reloadProvidersNow().getOrThrow()
+            }.onFailure { error ->
+                _state.update { it.copy(error = error.message ?: "Custom provider could not be saved") }
+            }
         }
-    }
 
     /** Remove a user-defined provider: config entry, preset, and its picker models. */
     fun deleteCustomProvider(id: String) {
         viewModelScope.launch(Dispatchers.IO) {
-            val cfg = customProviders.load()
-            customProviders.save(cfg.copy(provider = cfg.provider - id))
-            customPresets = customPresets - id
-            customLimits = customLimits.filterKeys { !it.startsWith("$id/") }
-            _state.update { s -> s.copy(models = s.models.filterNot { it.providerId == id }) }
+            runCatching {
+                val cfg = customProviders.load()
+                customProviders.save(cfg.copy(provider = cfg.provider - id))
+                keyStore.put(customProviderSecretName(id), "")
+                keyStore.put(id, "")
+                reloadProvidersNow().getOrThrow()
+            }.onFailure { error ->
+                _state.update { it.copy(error = error.message ?: "Custom provider could not be removed") }
+            }
         }
     }
 
@@ -608,31 +737,71 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun linkSharedFolder(uri: android.net.Uri) {
+        if (_state.value.sessionLoading) return fail("Wait for the current data operation to finish.")
         viewModelScope.launch(Dispatchers.IO) {
-            runCatching { sharedFileAccess.link(uri) }
-                .onSuccess { folders -> _state.update { it.copy(sharedFolders = folders, notice = "Folder linked") } }
-                .onFailure { error -> _state.update { it.copy(error = "Could not link folder: ${error.message}") } }
+            metadataMutationMutex.withLock {
+                runCatching { sharedFileAccess.link(uri) }
+                    .onSuccess { folders -> _state.update { it.copy(sharedFolders = folders, notice = "Folder linked") } }
+                    .onFailure { error -> _state.update { it.copy(error = "Could not link folder: ${error.message}") } }
+            }
         }
     }
 
     fun unlinkSharedFolder(id: String) {
+        if (_state.value.sessionLoading) return fail("Wait for the current data operation to finish.")
+        val affected = _state.value.projects.filter { it.folderId == id }
+        if (_state.value.isRunning && affected.any { it.id == currentProjectId }) {
+            return fail("Stop the current agent before removing this folder.")
+        }
+        _state.update { it.copy(sessionLoading = true) }
         viewModelScope.launch(Dispatchers.IO) {
-            val folders = sharedFileAccess.unlink(id)
-            val projectIds = projectStore.list().filter { it.folderId == id }.map { it.id }.toSet()
-            if (projectIds.isNotEmpty()) {
+            metadataMutationMutex.withLock {
+            val originalProjects = projectStore.list()
+            val projects = originalProjects.filter { it.folderId == id }
+            val projectIds = projects.mapTo(mutableSetOf()) { it.id }
+            val originalSessions = sessionStore.list().filter { it.projectId in projectIds }
+                .mapNotNull { sessionStore.load(it.id) }
+            val recovered = mutableListOf<RecoveredWorkspace>()
+            val originalActiveProject = currentProjectId
+            val activeRemoved = originalActiveProject in projectIds
+            try {
                 sessionStore.list().filter { it.projectId in projectIds }.forEach { sessionStore.setProject(it.id, null) }
                 projectIds.forEach(projectStore::delete)
+                projects.mapNotNullTo(recovered) { recoverProjectWorkspace(it) }
+                if (activeRemoved) setActiveProject(null)
+                val folders = sharedFileAccess.unlink(id)
+                _state.update {
+                    it.copy(
+                        sharedFolders = folders,
+                        projects = projectStore.list(),
+                        sessions = sessionStore.list(),
+                        currentProjectId = if (activeRemoved) null else it.currentProjectId,
+                        notice = if (recovered.isEmpty()) "Folder access removed" else
+                            "Folder access removed. Workspace files moved to ${recovered.joinToString { item -> item.relativePath }}.",
+                    )
+                }
+            } catch (error: Throwable) {
+                val rollbackFailed = recovered.asReversed().mapNotNull { runCatching { restoreProjectWorkspace(it) }.exceptionOrNull() }
+                    .toMutableList()
+                runCatching { projectStore.replace(originalProjects) }.exceptionOrNull()?.let(rollbackFailed::add)
+                originalSessions.forEach { session ->
+                    runCatching { sessionStore.save(session) }.exceptionOrNull()?.let(rollbackFailed::add)
+                }
+                if (activeRemoved) {
+                    runCatching { setActiveProject(originalActiveProject) }.exceptionOrNull()?.let(rollbackFailed::add)
+                }
+                if (error is kotlinx.coroutines.CancellationException) throw error
+                _state.update {
+                    it.copy(
+                        projects = projectStore.list(),
+                        sessions = sessionStore.list(),
+                        error = "Could not remove folder access: ${error.message}" +
+                            if (rollbackFailed.isEmpty()) "" else ". Some changes could not be restored.",
+                    )
+                }
+            } finally {
+                _state.update { state -> state.copy(sessionLoading = false) }
             }
-            val activeRemoved = currentProjectId in projectIds
-            if (activeRemoved) setActiveProject(null)
-            _state.update {
-                it.copy(
-                    sharedFolders = folders,
-                    projects = projectStore.list(),
-                    sessions = sessionStore.list(),
-                    currentProjectId = if (activeRemoved) null else it.currentProjectId,
-                    notice = "Folder access removed",
-                )
             }
         }
     }
@@ -645,20 +814,38 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
      * under its folder in the drawer right away instead of existing only in memory.
      */
     fun newChat(projectId: String? = currentProjectId) {
-        if (_state.value.isRunning) cancel()
+        if (_state.value.isRunning) return fail("Stop the current agent before starting another chat.")
+        if (_state.value.sessionLoading) return fail("Wait for the current data operation to finish.")
+        sessionSwitchJob?.cancel()
+        loadingSessionId = null
+        sessionSelection++
+        pendingMessages.clear()
         dropIfEmptyPlaceholder()
         generation++
         history = emptyList()
-        sessionId = "session-" + System.currentTimeMillis()
-        setActiveProject(projectId)
+        resetStreamingBuffers()
+        sessionId = newSessionId()
+        val activeProjectId = setActiveProject(projectId)
+        val defaultMode = runCatching { AgentMode.valueOf(appSettings.load().defaultMode) }.getOrDefault(AgentMode.BUILD)
         todoStore.replace(emptyList())
+        sessionStore.create(PersistedSession(sessionId, "New chat", System.currentTimeMillis(), emptyList(), activeProjectId))
+        appSettings.update { it.copy(activeSessionId = sessionId) }
         _state.update {
-            it.copy(lines = emptyList(), streaming = "", streamingReasoning = "", usageInput = 0, usageOutput = 0, error = null, interruptedTurn = false, currentSessionId = sessionId, currentProjectId = projectId)
-        }
-        val id = sessionId
-        viewModelScope.launch(Dispatchers.IO) {
-            sessionStore.save(PersistedSession(id, "New chat", System.currentTimeMillis(), emptyList(), projectId))
-            _state.update { it.copy(sessions = sessionStore.list()) }
+            it.copy(
+                lines = emptyList(),
+                streaming = "",
+                streamingReasoning = "",
+                usageInput = 0,
+                usageOutput = 0,
+                error = null,
+                interruptedTurn = false,
+                sessionLoading = false,
+                currentSessionId = sessionId,
+                currentProjectId = activeProjectId,
+                agentMode = defaultMode,
+                queued = emptyList(),
+                sessions = sessionStore.list(),
+            )
         }
     }
 
@@ -667,52 +854,102 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         if (history.isEmpty() && _state.value.lines.isEmpty()) {
             val id = sessionId
             viewModelScope.launch(Dispatchers.IO) {
-                if (sessionStore.load(id)?.messages?.isEmpty() == true) sessionStore.delete(id)
-                _state.update { it.copy(sessions = sessionStore.list()) }
+                metadataMutationMutex.withLock {
+                    if (sessionStore.load(id)?.messages?.isEmpty() == true) sessionStore.delete(id)
+                    _state.update { it.copy(sessions = sessionStore.list()) }
+                }
             }
         }
     }
 
     /** Load a saved conversation and make it the active session. Works mid-stream (cancels first). */
     fun switchSession(id: String) {
-        if (id == sessionId) return
-        if (_state.value.isRunning) cancel()
+        if (id == sessionId) {
+            if (sessionSwitchJob?.isActive == true) {
+                sessionSwitchJob?.cancel()
+                sessionSelection++
+                loadingSessionId = null
+                _state.update { it.copy(sessionLoading = false) }
+            }
+            return
+        }
+        if (_state.value.isRunning) return fail("Stop the current agent before opening another chat.")
+        if (_state.value.sessionLoading) return fail("Wait for the current data operation to finish.")
+        sessionSwitchJob?.cancel()
+        pendingMessages.clear()
         dropIfEmptyPlaceholder()
-        generation++ // bump on the main thread (single-writer for the turn guard), like send/cancel do
-        viewModelScope.launch(Dispatchers.IO) {
-            val loaded = sessionStore.load(id) ?: return@launch
+        generation++
+        val selection = ++sessionSelection
+        loadingSessionId = id
+        _state.update { it.copy(sessionLoading = true, error = null) }
+        sessionSwitchJob = viewModelScope.launch(Dispatchers.IO) {
+            val loaded = sessionStore.load(id)
+            if (loaded == null) {
+                withContext(Dispatchers.Main.immediate) {
+                    if (selection == sessionSelection) {
+                        loadingSessionId = null
+                        _state.update { it.copy(sessionLoading = false, error = "This chat is no longer available.") }
+                    }
+                }
+                return@launch
+            }
             val interrupted = loaded.activeTurn
             val restored = loaded.messages.map { it.toDomain() }.let {
                 if (interrupted) repairInterruptedHistory(it) else it
             }
-            history = restored
-            sessionId = loaded.id
-            setActiveProject(loaded.projectId)
-            todoStore.replace(emptyList())
-            _state.update {
-                it.copy(
-                    lines = restored.toChatLines(),
-                    streaming = "",
-                    streamingReasoning = "",
-                    usageInput = 0,
-                    usageOutput = 0,
-                    error = if (interrupted) TURN_INTERRUPTED_MESSAGE else null,
-                    interruptedTurn = interrupted,
-                    currentSessionId = sessionId,
-                    currentProjectId = loaded.projectId,
-                )
+            val committed = withContext(Dispatchers.Main.immediate) {
+                if (selection != sessionSelection) return@withContext false to null
+                loadingSessionId = null
+                history = restored
+                resetStreamingBuffers()
+                sessionId = loaded.id
+                val activeProjectId = setActiveProject(loaded.projectId)
+                todoStore.replace(loaded.todos)
+                appSettings.update { it.copy(activeSessionId = loaded.id) }
+                _state.update {
+                    it.copy(
+                        lines = restored.toChatLines(),
+                        streaming = "",
+                        streamingReasoning = "",
+                        usageInput = 0,
+                        usageOutput = 0,
+                        error = if (interrupted) TURN_INTERRUPTED_MESSAGE else null,
+                        interruptedTurn = interrupted,
+                        sessionLoading = false,
+                        currentSessionId = sessionId,
+                        currentProjectId = activeProjectId,
+                        queued = emptyList(),
+                    )
+                }
+                true to activeProjectId
             }
-            if (interrupted) {
-                sessionStore.save(loaded.copy(messages = restored.map { it.toPersisted() }, activeTurn = false))
+            if (committed.first && (interrupted || loaded.projectId != committed.second)) {
+                sessionStore.save(
+                    loaded.copy(
+                        messages = restored.map { it.toPersisted() },
+                        activeTurn = false,
+                        projectId = committed.second,
+                    ),
+                )
             }
         }
     }
 
     fun deleteSession(id: String) {
+        if (id == sessionId && _state.value.isRunning) return fail("Stop the current agent before deleting this chat.")
+        if (_state.value.sessionLoading && loadingSessionId != id) return fail("Wait for the current data operation to finish.")
+        if (loadingSessionId == id) {
+            sessionSwitchJob?.cancel()
+            sessionSelection++
+            loadingSessionId = null
+            _state.update { it.copy(sessionLoading = false) }
+        }
         if (id == sessionId) newChat()
         viewModelScope.launch(Dispatchers.IO) {
-            sessionStore.delete(id)
-            _state.update { it.copy(sessions = sessionStore.list()) }
+            metadataMutationMutex.withLock {
+                sessionStore.delete(id)
+                _state.update { it.copy(sessions = sessionStore.list()) }
+            }
         }
     }
 
@@ -721,7 +958,9 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun createProject(uri: android.net.Uri) {
+        if (_state.value.sessionLoading) return fail("Wait for the current data operation to finish.")
         viewModelScope.launch(Dispatchers.IO) {
+            metadataMutationMutex.withLock {
             runCatching {
                 val folders = sharedFileAccess.link(uri)
                 val folder = folders.first { it.handle == uri.toString() }
@@ -736,93 +975,143 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             }.onFailure { error ->
                 _state.update { it.copy(error = "Could not create project: ${error.message}") }
             }
+            }
         }
     }
 
     fun renameProject(id: String, name: String) {
+        if (_state.value.sessionLoading) return fail("Wait for the current data operation to finish.")
         val trimmed = name.trim()
         if (trimmed.isEmpty()) return
         viewModelScope.launch(Dispatchers.IO) {
-            projectStore.rename(id, trimmed)
-            _state.update { it.copy(projects = projectStore.list()) }
+            metadataMutationMutex.withLock {
+                projectStore.rename(id, trimmed)
+                _state.update { it.copy(projects = projectStore.list()) }
+            }
         }
     }
 
     /** Delete a project; its chats are detached to "unsorted" rather than removed. */
     fun deleteProject(id: String) {
+        if (currentProjectId == id && _state.value.isRunning) return fail("Stop the current agent before deleting this project.")
+        if (_state.value.sessionLoading) return fail("Wait for the current data operation to finish.")
+        _state.update { it.copy(sessionLoading = true) }
         viewModelScope.launch(Dispatchers.IO) {
-            val folderId = projectStore.list().firstOrNull { it.id == id }?.folderId
-            sessionStore.list().filter { it.projectId == id }.forEach { sessionStore.setProject(it.id, null) }
-            projectStore.delete(id)
-            val folders = folderId?.let(sharedFileAccess::unlink) ?: sharedFolderStore.list()
-            if (currentProjectId == id) {
-                setActiveProject(null)
-                _state.update { it.copy(projects = projectStore.list(), sharedFolders = folders, sessions = sessionStore.list(), currentProjectId = null) }
-            } else {
-                _state.update { it.copy(projects = projectStore.list(), sharedFolders = folders, sessions = sessionStore.list()) }
+            metadataMutationMutex.withLock {
+            val originalProjects = projectStore.list()
+            val project = originalProjects.firstOrNull { it.id == id }
+            val originalSessions = sessionStore.list().filter { it.projectId == id }
+                .mapNotNull { sessionStore.load(it.id) }
+            var recovered: RecoveredWorkspace? = null
+            val activeRemoved = currentProjectId == id
+            try {
+                project ?: return@launch
+                sessionStore.list().filter { it.projectId == id }.forEach { sessionStore.setProject(it.id, null) }
+                projectStore.delete(id)
+                recovered = recoverProjectWorkspace(project)
+                if (activeRemoved) setActiveProject(null)
+                val sharedElsewhere = project.folderId != null && originalProjects.any {
+                    it.id != id && it.folderId == project.folderId
+                }
+                val folders = if (sharedElsewhere) sharedFolderStore.list()
+                else project.folderId?.let(sharedFileAccess::unlink) ?: sharedFolderStore.list()
+                _state.update {
+                    it.copy(
+                        projects = projectStore.list(),
+                        sharedFolders = folders,
+                        sessions = sessionStore.list(),
+                        currentProjectId = if (activeRemoved) null else it.currentProjectId,
+                        notice = recovered?.let { item -> "Project removed. Chats moved to Unsorted; workspace files moved to ${item.relativePath}." }
+                            ?: "Project removed. Chats moved to Unsorted.",
+                    )
+                }
+            } catch (error: Throwable) {
+                val rollbackFailed = mutableListOf<Throwable>()
+                recovered?.let { runCatching { restoreProjectWorkspace(it) }.exceptionOrNull()?.let(rollbackFailed::add) }
+                runCatching { projectStore.replace(originalProjects) }.exceptionOrNull()?.let(rollbackFailed::add)
+                originalSessions.forEach { session ->
+                    runCatching { sessionStore.save(session) }.exceptionOrNull()?.let(rollbackFailed::add)
+                }
+                if (activeRemoved) {
+                    runCatching { setActiveProject(id) }.exceptionOrNull()?.let(rollbackFailed::add)
+                }
+                if (error is kotlinx.coroutines.CancellationException) throw error
+                _state.update {
+                    it.copy(
+                        projects = projectStore.list(),
+                        sessions = sessionStore.list(),
+                        error = "Could not remove project: ${error.message}" +
+                            if (rollbackFailed.isEmpty()) "" else ". Some changes could not be restored.",
+                    )
+                }
+            } finally {
+                _state.update { state -> state.copy(sessionLoading = false) }
+            }
             }
         }
     }
 
     fun renameSession(id: String, title: String) {
+        if (_state.value.sessionLoading) return fail("Wait for the current data operation to finish.")
         val trimmed = title.trim()
         if (trimmed.isEmpty()) return
         viewModelScope.launch(Dispatchers.IO) {
-            sessionStore.rename(id, trimmed)
-            _state.update { it.copy(sessions = sessionStore.list()) }
-        }
-    }
-
-    fun moveSession(id: String, projectId: String?) {
-        viewModelScope.launch(Dispatchers.IO) {
-            sessionStore.setProject(id, projectId)
-            if (id == sessionId) {
-                setActiveProject(projectId)
-                _state.update { it.copy(sessions = sessionStore.list(), currentProjectId = projectId) }
-            } else {
+            metadataMutationMutex.withLock {
+                sessionStore.rename(id, trimmed)
                 _state.update { it.copy(sessions = sessionStore.list()) }
             }
         }
     }
 
-    fun setSessionPinned(id: String, pinned: Boolean) {
+    fun moveSession(id: String, projectId: String?) {
+        if (id == sessionId && _state.value.isRunning) return fail("Stop the current agent before moving this chat.")
+        if (_state.value.sessionLoading) return fail("Wait for the current data operation to finish.")
+        val safeProjectId = projectId?.takeIf(PROJECT_ID::matches)
         viewModelScope.launch(Dispatchers.IO) {
-            sessionStore.setPinned(id, pinned)
-            _state.update { it.copy(sessions = sessionStore.list()) }
+            metadataMutationMutex.withLock {
+            sessionStore.setProject(id, safeProjectId)
+            if (id == sessionId) {
+                setActiveProject(safeProjectId)
+                _state.update { it.copy(sessions = sessionStore.list(), currentProjectId = safeProjectId) }
+            } else {
+                _state.update { it.copy(sessions = sessionStore.list()) }
+            }
+            }
+        }
+    }
+
+    fun setSessionPinned(id: String, pinned: Boolean) {
+        if (_state.value.sessionLoading) return fail("Wait for the current data operation to finish.")
+        viewModelScope.launch(Dispatchers.IO) {
+            metadataMutationMutex.withLock {
+                sessionStore.setPinned(id, pinned)
+                _state.update { it.copy(sessions = sessionStore.list()) }
+            }
         }
     }
 
     /** Archiving a chat drops it out of the main list; the active chat falls back to a fresh one. */
     fun setSessionArchived(id: String, archived: Boolean) {
+        if (archived && id == sessionId && _state.value.isRunning) return fail("Stop the current agent before archiving this chat.")
+        if (_state.value.sessionLoading) return fail("Wait for the current data operation to finish.")
         if (archived && id == sessionId) newChat()
         viewModelScope.launch(Dispatchers.IO) {
-            sessionStore.setArchived(id, archived)
-            _state.update { it.copy(sessions = sessionStore.list()) }
+            metadataMutationMutex.withLock {
+                sessionStore.setArchived(id, archived)
+                _state.update { it.copy(sessions = sessionStore.list()) }
+            }
         }
     }
 
-    fun saveMcpServer(name: String, server: McpServerConfig) {
-        val trimmed = name.trim()
-        if (trimmed.isEmpty()) return
-        val original = trimmed.takeIf { it in _state.value.mcpServers }
-        viewModelScope.launch(Dispatchers.IO) {
-            repo.upsertMcpServer(original, trimmed, server).fold(
-                onSuccess = { updated ->
-                    _state.update { it.copy(mcpServers = updated.mcp, mcpConfigError = null) }
-                    reconnectMcp()
-                },
-                onFailure = { failure ->
-                    _state.update { it.copy(mcpConfigError = failure.message ?: "MCP configuration could not be saved") }
-                },
-            )
-        }
-    }
-
-    suspend fun saveMcpServerAndWait(name: String, server: McpServerConfig): Result<Unit> = withContext(Dispatchers.IO) {
+    suspend fun saveMcpServerAndWait(
+        name: String,
+        server: McpServerConfig,
+        expectedServer: McpServerConfig? = null,
+    ): Result<Unit> = withContext(Dispatchers.IO) {
         val trimmed = name.trim()
         if (trimmed.isEmpty()) return@withContext Result.failure(IllegalArgumentException("Server name is required"))
         val original = trimmed.takeIf { it in _state.value.mcpServers }
-        repo.upsertMcpServer(original, trimmed, server).fold(
+        repo.upsertMcpServer(original, trimmed, server, expectedServer).fold(
             onSuccess = { updated ->
                 _state.update { it.copy(mcpServers = updated.mcp, mcpConfigError = null) }
                 reconnectMcpNow(force = true)
@@ -876,8 +1165,17 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         if (!force && fingerprint == lastMcpFingerprint) return@withLock
         val loaded = repo.loadMcpConfigState()
         if (loaded is McpConfigLoad.Invalid) {
+            mcpTools = emptyList()
+            rebuildTools()
             lastMcpFingerprint = fingerprint
-            _state.update { it.copy(mcpConnecting = emptySet(), mcpConfigError = loaded.message) }
+            _state.update {
+                it.copy(
+                    mcpConnecting = emptySet(),
+                    mcpSnapshots = emptyMap(),
+                    mcpToolCount = 0,
+                    mcpConfigError = loaded.message,
+                )
+            }
             return@withLock
         }
         val config = (loaded as McpConfigLoad.Ready).config
@@ -888,7 +1186,9 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 mcpConfigError = null,
             )
         }
-        val connected = runCatching { connectMcpServersDetailed(config, http) }.getOrElse {
+        val connected = runCatching {
+            connectMcpServersDetailed(config, http, baseTools.mapTo(mutableSetOf()) { it.name })
+        }.getOrElse {
             if (it is kotlinx.coroutines.CancellationException) throw it
             dev.phonecode.tools.mcp.McpConnectionResult(emptyList(), emptyMap())
         }
@@ -935,6 +1235,27 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    suspend fun readSkill(id: String): Result<String> = withContext(Dispatchers.IO) {
+        repo.readSkill(id, workspace)
+    }
+
+    suspend fun saveSkillAndWait(
+        id: String?,
+        scope: dev.phonecode.app.data.SkillScope,
+        name: String,
+        content: String,
+        expectedContent: String? = null,
+    ): Result<Unit> =
+        withContext(Dispatchers.IO) {
+            val result = if (id == null) {
+                repo.writeSkillFile(scope, name.trim(), content = content, projectDir = workspace)
+            } else {
+                repo.writeSkill(id, content, workspace, expectedContent)
+            }
+            if (result.isSuccess) refreshSkillsNow()
+            result
+        }
+
     private fun refreshSkillsNow() {
         val inventory = repo.scanSkills(workspace)
         discoveredSkills = inventory.active
@@ -948,6 +1269,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             val fingerprint = repo.runtimeFingerprint(workspace)
             if (fingerprint.skills != lastSkillsFingerprint) refreshSkillsNow()
             if (fingerprint.mcp != lastMcpFingerprint) reconnectMcpNow()
+            val providersFingerprint = runCatching { customProviders.fingerprint() }.getOrDefault("unreadable")
+            if (providersFingerprint != lastProvidersFingerprint) reloadProvidersNow()
         }
     }
 
@@ -962,9 +1285,35 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         snapshot.instructions.trim().takeIf { snapshot.connected && it.isNotEmpty() }
             ?.take(512)?.let { "$name:\n$it" }
     }
+
     fun configDirPath(): String = configDir.absolutePath
-    fun keyFor(providerId: String): String = keyStore.get(providerId).orEmpty()
-    fun setKey(providerId: String, key: String) = keyStore.put(providerId, key.trim())
+    fun availableTools(): List<AgentToolInfo> {
+        val remoteNames = mcpTools.mapTo(mutableSetOf()) { it.name }
+        return tools.all().sortedBy { it.name }.map { tool ->
+            AgentToolInfo(
+                name = tool.name,
+                description = tool.description,
+                source = when {
+                    tool.name in remoteNames -> "MCP"
+                    tool.name == "skill" -> "Skills"
+                    else -> "PhoneCode"
+                },
+                access = when {
+                    tool.mutating -> "Approval required"
+                    tool.name == "process" || tool.name == "git_branch" -> "Depends on action"
+                    else -> "Read only"
+                },
+            )
+        }
+    }
+    private fun providerSecretName(providerId: String): String =
+        if (providerId in customPresets) customProviderSecretName(providerId) else providerId
+
+    fun keyFor(providerId: String): String = keyStore.get(providerSecretName(providerId)).orEmpty()
+    fun setKey(providerId: String, key: String) = keyStore.put(providerSecretName(providerId), key.trim())
+    fun providerConfigured(providerId: String): Boolean =
+        !keyStore.get(if (providerId == "codex") "codex.access" else providerSecretName(providerId)).isNullOrBlank()
+    fun hasConfiguredProvider(): Boolean = allProviders().any { providerConfigured(it.id) }
     /** True when the device Keystore was unavailable and keys are stored UNENCRYPTED (warn on the providers screen). */
     fun secureStorageUnavailable(): Boolean = keyStore.secureStorageUnavailable
     fun clearError() = _state.update { it.copy(error = null, interruptedTurn = false) }
@@ -1021,7 +1370,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     private fun endLease(slot: AtomicReference<String?>, id: String? = slot.get()): Boolean {
         if (id == null) return false
         val endedCurrent = slot.compareAndSet(id, null)
-        foregroundLeases.release(id)
+        if (endedCurrent) foregroundLeases.release(id)
         return endedCurrent
     }
 
@@ -1137,39 +1486,89 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun importFrom(uri: android.net.Uri, onRestored: () -> Unit = {}) {
+        if (_state.value.isRunning) return fail("Stop the current agent before importing a backup.")
+        if (_state.value.sessionLoading) return fail("Wait for the current data operation to finish.")
+        sessionSwitchJob?.cancel()
+        val selection = ++sessionSelection
+        pendingMessages.clear()
+        _state.update { it.copy(sessionLoading = true, error = null, queued = emptyList()) }
         viewModelScope.launch(Dispatchers.IO) {
-            runCatching {
-                getApplication<Application>().contentResolver.openInputStream(uri)?.use { input ->
-                    TransferBundle.import(getApplication<Application>().filesDir, input)
-                } ?: error("could not open file")
-            }
-                .onSuccess { count ->
-                    refreshSessions()
-                    reloadProviders()
-                    // The import overwrote model_prefs.json and app_settings.json on disk; the
-                    // live state must reflect the RESTORED values, not the pre-import ones
-                    // (review finding: otherwise prefs/toggles look broken until a restart).
-                    val saved = appSettings.load()
-                    _state.update {
-                        it.copy(
-                            favourites = modelPrefs.favourites(),
-                            hiddenModels = modelPrefs.hiddenModels(),
-                            disabledProviders = modelPrefs.disabledProviders(),
-                            autoAccept = saved.autoAccept,
-                            agentMode = runCatching { AgentMode.valueOf(saved.defaultMode) }.getOrDefault(AgentMode.BUILD),
-                            notice = "Restored $count file(s)",
-                        )
-                    }
-                    onRestored()
+            val result = runCatching {
+                val restoreWriteBoundary = sessionWriteOrder.incrementAndGet()
+                val count = sessionStore.reconcileExternalRestore(restoreWriteBoundary) {
+                    getApplication<Application>().contentResolver.openInputStream(uri)?.use { input ->
+                        TransferBundle.import(getApplication<Application>().filesDir, input)
+                    } ?: error("could not open file")
                 }
-                .onFailure { e -> _state.update { it.copy(error = "Import failed: ${e.message}") } }
+                val saved = appSettings.load()
+                val loaded = saved.activeSessionId?.let(sessionStore::load) ?: sessionStore.loadLatest()
+                val restored = loaded ?: PersistedSession(newSessionId(), "New chat", System.currentTimeMillis(), emptyList())
+                val safeProjectId = restored.projectId?.takeIf(PROJECT_ID::matches)
+                val repaired = restored.messages.map { it.toDomain() }.let {
+                    if (restored.activeTurn) repairInterruptedHistory(it) else it
+                }
+                val normalized = restored.copy(
+                    messages = repaired.map { it.toPersisted() },
+                    projectId = safeProjectId,
+                    activeTurn = false,
+                )
+                if (loaded == null) sessionStore.create(normalized) else if (normalized != restored) sessionStore.save(normalized)
+                BackupRestore(
+                    count,
+                    saved,
+                    normalized,
+                    repaired,
+                    modelPrefs.favourites(),
+                    modelPrefs.hiddenModels(),
+                    modelPrefs.disabledProviders(),
+                    sessionStore.list(),
+                    projectStore.list(),
+                )
+            }
+            result.fold(
+                onSuccess = { restored ->
+                    withContext(Dispatchers.Main.immediate) {
+                        if (selection != sessionSelection) return@withContext
+                        history = restored.messages
+                        sessionId = restored.session.id
+                        val activeProjectId = setActiveProject(restored.session.projectId)
+                        todoStore.replace(restored.session.todos)
+                        appSettings.update { restored.settings.copy(activeSessionId = restored.session.id) }
+                        _state.update {
+                            it.copy(
+                                favourites = restored.favourites,
+                                hiddenModels = restored.hiddenModels,
+                                disabledProviders = restored.disabledProviders,
+                                autoAccept = restored.settings.autoAccept,
+                                agentMode = runCatching { AgentMode.valueOf(restored.settings.defaultMode) }.getOrDefault(AgentMode.BUILD),
+                                lines = restored.messages.toChatLines(),
+                                currentSessionId = restored.session.id,
+                                currentProjectId = activeProjectId,
+                                sessions = restored.sessions,
+                                projects = restored.projects,
+                                sessionLoading = false,
+                                notice = "Restored ${restored.count} file(s)",
+                            )
+                        }
+                        reloadProviders()
+                        onRestored()
+                    }
+                },
+                onFailure = { error ->
+                    withContext(Dispatchers.Main.immediate) {
+                        if (selection == sessionSelection) {
+                            _state.update { it.copy(sessionLoading = false, error = "Import failed: ${error.message}") }
+                        }
+                    }
+                },
+            )
         }
     }
     fun resolvePermission(approved: Boolean) { pendingDecision?.complete(approved) }
     fun resolveQuestion(answers: List<UserAnswer>) { pendingQuestionDecision?.complete(answers) }
 
     private fun connectedProvider(preset: ProviderPreset): LlmProvider? {
-        val key = if (preset.id == "codex") codexAuth.accessToken() else keyStore.get(preset.id)
+        val key = if (preset.id == "codex") codexAuth.accessToken() else keyStore.get(providerSecretName(preset.id))
         if (key.isNullOrBlank()) return null
         val resolved = if (preset.id == "codex") {
             codexAuth.accountId()
@@ -1226,17 +1625,21 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         val provider = connectedProvider(preset)
             ?: return if (preset.id == "codex") "ChatGPT sign-in expired" else "no API key configured for ${preset.displayName}"
         val parentMode = _state.value.agentMode // capture so the child can't escalate PLAN->BUILD mid-subtask
+        val childEffort = if (supportsReasoning(selected)) _state.value.effort else ReasoningEffort.DEFAULT
+        val childLimit = limitFor(selected)
         val childConfig = AgentConfig(
             model = selected.modelId,
             mode = parentMode,
             environment = environment(),
-            reasoningEffort = _state.value.effort,
+            reasoningEffort = childEffort,
             mcpInstructions = mcpInstructions(),
-            sessionId = "phonecode-sub",
+            sessionId = "phonecode-sub-${java.util.UUID.randomUUID()}",
+            projectInstructions = loadProjectInstructions(turnWorkspace ?: workspace, appSettings.load().customInstructions),
         )
         val childTools = ToolRegistry(tools.all().filterNot { it.name == "task" || it.planOnly })
         val childLoop = AgentLoop(
             provider, childTools, toolContext, childConfig,
+            turnSettings = { boundedTurnSettings(selected.modelId, childEffort, childLimit) },
             modeProvider = { parentMode },
             toolProvider = {
                 refreshRuntimeConfiguration()
@@ -1256,26 +1659,41 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         return childError?.let { "subagent error: $it" } ?: out.toString()
     }
 
-    fun send(input: String, images: List<MessagePart.Image> = emptyList()) {
+    fun send(input: String, images: List<MessagePart.Image> = emptyList()): Boolean {
         val text = input.trim()
-        if (text.isEmpty() && images.isEmpty()) return
+        if (text.isEmpty() && images.isEmpty()) return false
+        if (_state.value.sessionLoading) {
+            fail("Wait for this chat to finish opening.")
+            return false
+        }
         if (_state.value.isRunning) {
-            if (images.isNotEmpty()) return fail("Wait for the current turn before sending a photo.")
+            if (images.isNotEmpty()) {
+                fail("Wait for the current turn before sending a photo.")
+                return false
+            }
             // Queue it for the running turn instead of dropping it; the agent picks it up at its next step.
             pendingMessages.add(text)
             _state.update { it.copy(queued = it.queued + text) }
-            return
+            return true
         }
-        val selected = _state.value.selected ?: return fail("Select a model first.")
-        val preset = providerFor(selected.providerId) ?: return fail("Unknown provider: ${selected.providerId}")
+        val selected = _state.value.selected ?: run {
+            fail("Select a model first.")
+            return false
+        }
+        val preset = providerFor(selected.providerId) ?: run {
+            fail("Unknown provider: ${selected.providerId}")
+            return false
+        }
         // Codex authenticates with the ChatGPT OAuth token (not an API key); gate on being signed in here,
         // then resolve a fresh token off the main thread inside the turn (accessToken() may refresh, i.e. hit
         // the network). Every other provider uses its stored API key directly.
         val isCodex = preset.id == "codex"
-        if (keyStore.get(if (isCodex) "codex.access" else selected.providerId).isNullOrBlank()) {
-            return fail(if (isCodex) "Sign in with ChatGPT in Settings to use Codex." else "Set an API key for ${preset.displayName} in Settings.")
+        if (keyStore.get(if (isCodex) "codex.access" else providerSecretName(selected.providerId)).isNullOrBlank()) {
+            fail(if (isCodex) "Sign in with ChatGPT in Settings to use Codex." else "Set an API key for ${preset.displayName} in Settings.")
+            return false
         }
 
+        resetStreamingBuffers()
         _state.update {
             it.copy(
                 lines = it.lines + ChatLine.User(text, images),
@@ -1317,7 +1735,13 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             if (gen == generation) {
                 val turnHistory = startingHistory + ChatMessage(Role.USER, userParts)
                 history = turnHistory
-                persist(turnHistory, activeTurn = true, targetSessionId = turnSessionId, targetProjectId = turnProjectId)
+                persist(
+                    turnHistory,
+                    activeTurn = true,
+                    targetSessionId = turnSessionId,
+                    targetProjectId = turnProjectId,
+                    expectedGeneration = gen,
+                )
             }
             val custom = appSettings.load().customInstructions.trim()
             // Drive the reasoning param off the model's own "thinking" config (from the models.dev catalog -
@@ -1331,13 +1755,13 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 reasoningEffort = if (reasons) _state.value.effort else ReasoningEffort.DEFAULT,
                 mcpInstructions = mcpInstructions(),
                 sessionId = turnSessionId,
-                projectInstructions = if (custom.isNotEmpty()) listOf(custom) else emptyList(),
+                projectInstructions = loadProjectInstructions(pinnedWorkspace, custom),
             )
             val limit = limitFor(selected) // context/output token limits drive the gauge + compaction
             try {
                 val provider = connectedProvider(preset)
                 if (provider == null) {
-                    sessionStore.setActiveTurn(turnSessionId, false)
+                    sessionStore.setActiveTurn(turnSessionId, false, sessionWriteOrder.incrementAndGet())
                     fail(if (isCodex) "Sign in with ChatGPT again in Settings." else "Set an API key for ${preset.displayName} in Settings.")
                     return@launch
                 }
@@ -1345,7 +1769,13 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                     provider, tools, toolContext, config,
                     steering = queueSource, // messages queued mid-turn are picked up at the next step (steer)
                     followUp = queueSource, // ...or run as a follow-up turn if queued right as the turn ends
-                    turnSettings = { TurnSettings(config.model, if (reasons) _state.value.effort else ReasoningEffort.DEFAULT, limit?.context, limit?.output) },
+                    turnSettings = {
+                        boundedTurnSettings(
+                            config.model,
+                            if (reasons) _state.value.effort else ReasoningEffort.DEFAULT,
+                            limit,
+                        )
+                    },
                     modeProvider = { _state.value.agentMode }, // live so a plan_exit approval flips PLAN→BUILD mid-run
                     toolProvider = {
                         refreshRuntimeConfiguration()
@@ -1353,18 +1783,23 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                     },
                     mcpInstructionsProvider = { mcpInstructions() },
                 )
-                if (startingHistory.isEmpty()) autoBranchIfEnabled(pinnedWorkspace, turnSessionId)
+                if (sessionStore.list().none { it.id == turnSessionId && it.branchInitialized } &&
+                    autoBranchIfEnabled(pinnedWorkspace, turnSessionId)
+                ) {
+                    sessionStore.setBranchInitialized(turnSessionId)
+                }
                 loop.run(startingHistory, userParts).collect { event ->
-                    if (gen == generation) reduce(event, turnSessionId, turnProjectId, selected.providerId)
+                    if (gen == generation) reduce(event, turnSessionId, turnProjectId, selected.providerId, gen)
                 }
             } catch (cancelled: kotlinx.coroutines.CancellationException) {
                 throw cancelled
             } catch (error: Throwable) {
                 if (gen == generation) {
+                    commitStopped()
                     _state.update {
                         it.copy(
                             error = "The turn stopped unexpectedly: ${humanizeError(error.message ?: error.javaClass.simpleName)} Review workspace changes before retrying.",
-                            interruptedTurn = true,
+                            interruptedTurn = false,
                         )
                     }
                 }
@@ -1377,6 +1812,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 endLease(turnLease, lease)
             }
         }
+        return true
     }
 
     /**
@@ -1399,18 +1835,39 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
 
     fun cancel() {
         generation++ // invalidate the in-flight turn's events immediately, then clean up here (single owner)
+        val stoppedWriteOrder = sessionWriteOrder.incrementAndGet()
         pendingMessages.clear() // stop means stop: don't let queued messages auto-run after a cancel
         // Cancel the job FIRST so an awaiting tool unwinds via CancellationException (no extra turn/side-effect);
         // completing the deferreds is then only a fallback to resume anything not yet at a cancellation point.
         job?.cancel()
-        endLease(turnLease)
+        val stoppedLease = turnLease.getAndSet(null)
         // The cancelled job's finally skips the pin clear (generation moved on) - release it here
         // so no stale workspace pin outlives the turn.
         turnWorkspace = null
         pendingDecision?.complete(false)
         pendingQuestionDecision?.complete(emptyList())
-        commitStopped()
-        sessionStore.setActiveTurn(sessionId, false)
+        commitStopped(persistChanges = false)
+        val stoppedSessionId = sessionId
+        val stoppedProjectId = currentProjectId
+        val stoppedHistory = history
+        val stoppedTodos = todoStore.snapshot()
+        (getApplication<Application>() as PhoneCodeApplication).turnScope.launch {
+            try {
+                if (stoppedHistory.isEmpty()) {
+                    sessionStore.setActiveTurn(stoppedSessionId, false, stoppedWriteOrder)
+                } else {
+                    persist(
+                        stoppedHistory,
+                        targetSessionId = stoppedSessionId,
+                        targetProjectId = stoppedProjectId,
+                        targetTodos = stoppedTodos,
+                        writeOrder = stoppedWriteOrder,
+                    )
+                }
+            } finally {
+                stoppedLease?.let(foregroundLeases::release)
+            }
+        }
         _state.update { it.copy(isRunning = false, retry = null, pendingPermission = null, pendingQuestion = null, queued = emptyList(), interruptedTurn = false) }
     }
 
@@ -1420,16 +1877,19 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
      * ending on a bare user message, which read as lost context next message (and which Anthropic rejects
      * as two user turns in a row). Writing the partial assistant reply keeps the model's view = the screen.
      */
-    private fun commitStopped() {
-        val s = _state.value
-        commitStreaming() // streaming buffer -> visible lines (unchanged behaviour)
-        if (s.streaming.isNotBlank() && history.lastOrNull()?.role == Role.USER) {
-            val parts = buildList {
-                if (s.streamingReasoning.isNotBlank()) add(MessagePart.Reasoning(s.streamingReasoning))
-                add(MessagePart.Text(s.streaming))
-            }
-            history = history + ChatMessage(Role.ASSISTANT, parts)
+    private fun commitStopped(persistChanges: Boolean = true) {
+        val streamed = commitStreaming()
+        val parts = buildList {
+            if (streamed.reasoning.isNotBlank()) add(MessagePart.Reasoning(streamed.reasoning))
+            if (streamed.text.isNotBlank()) add(MessagePart.Text(streamed.text))
+        }
+        history = repairInterruptedHistory(history).let { repaired ->
+            if (parts.isEmpty()) repaired else repaired + ChatMessage(Role.ASSISTANT, parts)
+        }
+        if (history.isNotEmpty() && persistChanges) {
             persist()
+        } else if (persistChanges) {
+            sessionStore.setActiveTurn(sessionId, false, sessionWriteOrder.incrementAndGet())
         }
     }
 
@@ -1438,16 +1898,23 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         targetSessionId: String,
         targetProjectId: String?,
         targetProviderId: String,
+        expectedGeneration: Int,
     ) {
         when (event) {
-            is AgentEvent.TextDelta -> _state.update { it.copy(streaming = it.streaming + event.text, retry = null) }
-            is AgentEvent.ReasoningDelta -> _state.update { it.copy(streamingReasoning = it.streamingReasoning + event.text, retry = null) }
+            is AgentEvent.TextDelta -> appendStreaming(text = event.text, expectedGeneration = expectedGeneration)
+            is AgentEvent.ReasoningDelta -> appendStreaming(reasoning = event.text, expectedGeneration = expectedGeneration)
             is AgentEvent.Retrying -> _state.update {
                 it.copy(retry = RetryState(event.attempt, event.message.take(100)))
             }
             is AgentEvent.HistoryCheckpoint -> {
                 history = event.messages
-                persist(event.messages, activeTurn = true, targetSessionId = targetSessionId, targetProjectId = targetProjectId)
+                persist(
+                    event.messages,
+                    activeTurn = true,
+                    targetSessionId = targetSessionId,
+                    targetProjectId = targetProjectId,
+                    expectedGeneration = expectedGeneration,
+                )
             }
             is AgentEvent.ToolStarted -> {
                 commitStreaming()
@@ -1455,7 +1922,11 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                     it.copy(
                         retry = null,
                         lines = it.lines + ChatLine.ToolActivity(
-                            event.id, event.name, ToolStatus.RUNNING, summarizeArgs(event.argsJson),
+                            event.id,
+                            event.name,
+                            ToolStatus.RUNNING,
+                            summarizeArgs(event.argsJson),
+                            boundedToolInput(event.argsJson),
                         ),
                     )
                 }
@@ -1471,14 +1942,13 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                     val updated = state.lines.toMutableList()
                     updated[index] = (updated[index] as ChatLine.ToolActivity).copy(
                         status = if (event.isError) ToolStatus.ERROR else ToolStatus.DONE,
-                        detail = event.output.take(300),
+                        detail = event.output,
                     )
                     state.copy(lines = updated)
                 }
             }
             // Latest turn's tokens = current context occupancy (input already includes history), not a session sum.
             is AgentEvent.Usage -> _state.update { it.copy(usageInput = event.input, usageOutput = event.output, retry = null) }
-            is AgentEvent.Compacted -> Unit
             is AgentEvent.UserMessage -> {
                 // The agent just folded a queued message into the turn: flush the live reply, drop the
                 // message into the timeline in order, and clear it from the pending list.
@@ -1486,23 +1956,53 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 _state.update { it.copy(lines = it.lines + ChatLine.User(event.text), queued = it.queued - event.text) }
             }
             is AgentEvent.Error -> {
+                val queuedWereDropped = _state.value.queued.isNotEmpty()
+                pendingMessages.clear()
                 // A failed turn that carried its accumulated messages preserves context (and persists it) so
                 // the next message continues the conversation instead of starting cold after a connection drop.
                 if (event.messages.isNotEmpty()) {
                     history = event.messages
                     commitStreaming()
-                    persist(event.messages, targetSessionId = targetSessionId, targetProjectId = targetProjectId)
+                    persist(
+                        event.messages,
+                        targetSessionId = targetSessionId,
+                        targetProjectId = targetProjectId,
+                        expectedGeneration = expectedGeneration,
+                    )
                 } else {
                     commitStreaming()
-                    sessionStore.setActiveTurn(targetSessionId, false)
+                    sessionStore.setActiveTurn(targetSessionId, false, sessionWriteOrder.incrementAndGet())
                 }
-                _state.update { it.copy(error = humanizeError(event, targetProviderId), isRunning = false, retry = null, interruptedTurn = false) }
+                _state.update {
+                    it.copy(
+                        error = humanizeError(event, targetProviderId),
+                        isRunning = false,
+                        retry = null,
+                        interruptedTurn = false,
+                        queued = emptyList(),
+                        notice = if (queuedWereDropped) "Queued messages were not sent." else it.notice,
+                    )
+                }
             }
             is AgentEvent.TurnComplete -> {
+                val queuedWereDropped = _state.value.queued.isNotEmpty()
+                pendingMessages.clear()
                 history = event.messages
                 commitStreaming()
-                persist(event.messages, targetSessionId = targetSessionId, targetProjectId = targetProjectId) // runs on the IO collector thread; survives app restart
-                _state.update { it.copy(retry = null, interruptedTurn = false) }
+                persist(
+                    event.messages,
+                    targetSessionId = targetSessionId,
+                    targetProjectId = targetProjectId,
+                    expectedGeneration = expectedGeneration,
+                )
+                _state.update {
+                    it.copy(
+                        retry = null,
+                        interruptedTurn = false,
+                        queued = emptyList(),
+                        notice = if (queuedWereDropped) "Queued messages were not sent." else it.notice,
+                    )
+                }
             }
         }
     }
@@ -1513,25 +2013,28 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         activeTurn: Boolean = false,
         targetSessionId: String = sessionId,
         targetProjectId: String? = currentProjectId,
+        targetTodos: List<TodoItem> = todoStore.snapshot(),
+        expectedGeneration: Int? = null,
+        writeOrder: Long = sessionWriteOrder.incrementAndGet(),
     ) {
         if (snapshot.isEmpty()) return
+        if (expectedGeneration != null && expectedGeneration != generation) return
         val suggestedTitle = snapshot.firstOrNull { it.role == Role.USER }
             ?.parts?.filterIsInstance<MessagePart.Text>()?.firstOrNull()?.text?.take(40)?.takeIf { it.isNotBlank() }
             ?: "New chat"
         runCatching {
-            val stored = sessionStore.load(targetSessionId)
-            val title = stored?.title?.takeUnless { it == "New chat" } ?: suggestedTitle
-            sessionStore.save(
+            if (expectedGeneration != null && expectedGeneration != generation) return@runCatching
+            sessionStore.checkpoint(
                 PersistedSession(
                     id = targetSessionId,
-                    title = title,
+                    title = suggestedTitle,
                     updatedAt = System.currentTimeMillis(),
                     messages = snapshot.map { it.toPersisted() },
-                    projectId = if (stored == null) targetProjectId else stored.projectId,
-                    pinned = stored?.pinned ?: false,
-                    archived = stored?.archived ?: false,
+                    projectId = targetProjectId,
                     activeTurn = activeTurn,
+                    todos = targetTodos,
                 ),
+                writeOrder,
             )
             _state.update { it.copy(sessions = sessionStore.list()) }
         }
@@ -1553,13 +2056,19 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                     is MessagePart.Image -> Unit
                     is MessagePart.Reasoning -> lines += ChatLine.Reasoning(part.text)
                     is MessagePart.ToolCall ->
-                        lines += ChatLine.ToolActivity(part.id, part.name, ToolStatus.DONE, summarizeArgs(part.argsJson))
+                        lines += ChatLine.ToolActivity(
+                            part.id,
+                            part.name,
+                            ToolStatus.DONE,
+                            summarizeArgs(part.argsJson),
+                            boundedToolInput(part.argsJson),
+                        )
                     is MessagePart.ToolResult -> {
                         val index = lines.indexOfLast { it is ChatLine.ToolActivity && it.id == part.callId }
                         if (index >= 0) {
                             lines[index] = (lines[index] as ChatLine.ToolActivity).copy(
                                 status = if (part.isError) ToolStatus.ERROR else ToolStatus.DONE,
-                                detail = part.content.take(300),
+                                detail = part.content,
                             )
                         }
                     }
@@ -1569,11 +2078,49 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         return lines
     }
 
-    private fun commitStreaming() = _state.update { s ->
-        var lines = s.lines
-        if (s.streamingReasoning.isNotBlank()) lines = lines + ChatLine.Reasoning(s.streamingReasoning)
-        if (s.streaming.isNotBlank()) lines = lines + ChatLine.Assistant(s.streaming)
-        if (lines === s.lines) s else s.copy(lines = lines, streaming = "", streamingReasoning = "")
+    private fun appendStreaming(text: String = "", reasoning: String = "", expectedGeneration: Int) {
+        val snapshot = synchronized(streamBufferLock) {
+            if (expectedGeneration != generation) return@synchronized null
+            streamingTextBuffer.append(text)
+            streamingReasoningBuffer.append(reasoning)
+            val now = System.nanoTime()
+            if (lastStreamFlushAt != 0L && now - lastStreamFlushAt < STREAM_UI_INTERVAL_NANOS) {
+                null
+            } else {
+                lastStreamFlushAt = now
+                StreamSnapshot(streamingTextBuffer.toString(), streamingReasoningBuffer.toString())
+            }
+        }
+        snapshot?.let { current ->
+            _state.update { it.copy(streaming = current.text, streamingReasoning = current.reasoning, retry = null) }
+        }
+    }
+
+    private fun resetStreamingBuffers() = synchronized(streamBufferLock) {
+        streamingTextBuffer.setLength(0)
+        streamingReasoningBuffer.setLength(0)
+        lastStreamFlushAt = 0L
+    }
+
+    private fun commitStreaming(): StreamSnapshot {
+        val snapshot = synchronized(streamBufferLock) {
+            StreamSnapshot(streamingTextBuffer.toString(), streamingReasoningBuffer.toString()).also {
+                streamingTextBuffer.setLength(0)
+                streamingReasoningBuffer.setLength(0)
+                lastStreamFlushAt = 0L
+            }
+        }
+        _state.update { state ->
+            var lines = state.lines
+            if (snapshot.reasoning.isNotBlank()) lines = lines + ChatLine.Reasoning(snapshot.reasoning)
+            if (snapshot.text.isNotBlank()) lines = lines + ChatLine.Assistant(snapshot.text)
+            if (lines === state.lines && state.streaming.isEmpty() && state.streamingReasoning.isEmpty()) {
+                state
+            } else {
+                state.copy(lines = lines, streaming = "", streamingReasoning = "")
+            }
+        }
+        return snapshot
     }
 
     private fun fail(message: String) = _state.update { it.copy(error = humanizeError(message), interruptedTurn = false) }
@@ -1652,6 +2199,14 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun summarizeArgs(argsJson: String): String = argsJson.replace("\n", " ").take(120)
 
+    private fun boundedToolInput(argsJson: String): String = if (argsJson.length <= MAX_TOOL_INPUT_CHARS) {
+        argsJson
+    } else {
+        argsJson.take(MAX_TOOL_INPUT_CHARS / 2) +
+            "\n[Input truncated; showing beginning and end.]\n" +
+            argsJson.takeLast(MAX_TOOL_INPUT_CHARS / 2)
+    }
+
     override fun onCleared() {
         // Stop background daemons promptly: the GitHub poll thread checks this flag every ≤500ms,
         // and the Codex loopback listener would otherwise hold port 1455 until its 5-min timeout.
@@ -1661,7 +2216,6 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         foregroundLeases.unregisterStopHandler("turn")
         foregroundLeases.unregisterStopHandler("processes")
         processManager.stopAll()
-        super.onCleared()
     }
 }
 
@@ -1732,6 +2286,17 @@ internal fun catalogProviderId(id: String): String = when (id) {
     else -> id
 }
 
+internal fun visibleCodexModels(models: List<CodexModelInfo>): List<CodexModelInfo> =
+    models.filter { it.visibility == "list" }
+
+internal fun boundedTurnSettings(
+    model: String,
+    effort: ReasoningEffort,
+    limit: dev.phonecode.provider.catalog.Limit?,
+): TurnSettings = TurnSettings(model, effort, limit?.context, limit?.output)
+
+private fun newSessionId(): String = "session-${UUID.randomUUID()}"
+
 fun builtInModels(): List<ModelOption> = listOf(
     ModelOption("anthropic", "claude-opus-4-8", "Claude Opus 4.8"),
     ModelOption("anthropic", "claude-sonnet-4-6", "Claude Sonnet 4.6"),
@@ -1760,6 +2325,9 @@ fun builtInModels(): List<ModelOption> = listOf(
 
 private const val CATALOG_REFRESH_TTL_MS = 6L * 60 * 60 * 1000
 private const val CODEX_REFRESH_TTL_MS = 5L * 60 * 1000
+private const val MAX_TOOL_INPUT_CHARS = 64_000
+private const val STREAM_UI_INTERVAL_NANOS = 50_000_000L
+private val PROJECT_ID = Regex("[A-Za-z0-9][A-Za-z0-9._-]{0,119}")
 private const val BUNDLED_CATALOG = """
 {
   "openai":{"id":"openai","name":"OpenAI","models":{"gpt-5.6":{"id":"gpt-5.6","name":"GPT-5.6","reasoning":true,"reasoning_options":[{"type":"effort","values":["none","low","medium","high","xhigh","max"]}],"tool_call":true,"attachment":true,"limit":{"context":1050000,"output":128000}},"gpt-5.6-sol":{"id":"gpt-5.6-sol","name":"GPT-5.6 Sol","reasoning":true,"reasoning_options":[{"type":"effort","values":["none","low","medium","high","xhigh","max"]}],"tool_call":true,"attachment":true,"limit":{"context":1050000,"output":128000}},"gpt-5.6-terra":{"id":"gpt-5.6-terra","name":"GPT-5.6 Terra","reasoning":true,"reasoning_options":[{"type":"effort","values":["none","low","medium","high","xhigh","max"]}],"tool_call":true,"attachment":true,"limit":{"context":1050000,"output":128000}},"gpt-5.6-luna":{"id":"gpt-5.6-luna","name":"GPT-5.6 Luna","reasoning":true,"reasoning_options":[{"type":"effort","values":["none","low","medium","high","xhigh","max"]}],"tool_call":true,"attachment":true,"limit":{"context":1050000,"output":128000}},"gpt-5.5":{"id":"gpt-5.5","name":"GPT-5.5"},"o3":{"id":"o3","name":"o3"}}},

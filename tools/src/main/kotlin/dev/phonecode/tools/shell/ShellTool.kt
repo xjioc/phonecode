@@ -20,7 +20,6 @@ import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonObject
 import java.io.File
-import java.util.concurrent.TimeUnit
 
 class ShellTool(
     private val shellProvider: (String) -> List<String> = { emptyList() },
@@ -92,10 +91,9 @@ class ShellTool(
                     withTimeout(timeoutS * 1_000L) { runInterruptible { process.waitFor() } }
                 } catch (_: TimeoutCancellationException) {
                     timedOut = true
-                    terminate(process)
-                    runCatching { process.exitValue() }.getOrDefault(-1)
+                    -1
                 } finally {
-                    if (process.isAlive) terminate(process)
+                    terminateProcessTree(process)
                 }
                 reader.await()
                 val truncated = output.length >= MAX_OUTPUT
@@ -115,13 +113,5 @@ class ShellTool(
 
     private companion object {
         const val MAX_OUTPUT = 48_000
-
-        private fun terminate(process: Process) {
-            process.destroy()
-            if (!runCatching { process.waitFor(2, TimeUnit.SECONDS) }.getOrDefault(false)) {
-                process.destroyForcibly()
-                runCatching { process.waitFor(2, TimeUnit.SECONDS) }
-            }
-        }
     }
 }

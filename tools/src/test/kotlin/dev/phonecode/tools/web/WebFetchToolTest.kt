@@ -61,6 +61,13 @@ class WebFetchToolTest {
         assertTrue(result.isError)
     }
 
+    @Test fun rejectsCleartextRemoteUrls() = runBlocking {
+        val result = tool.execute(buildJsonObject { put("url", "http://example.com/x") }, Ctx)
+
+        assertTrue(result.isError)
+        assertTrue(result.output.contains("HTTPS"))
+    }
+
     @Test fun missingUrlIsError() = runBlocking {
         assertTrue(tool.execute(JsonObject(emptyMap()), Ctx).isError)
     }

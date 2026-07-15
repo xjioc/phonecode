@@ -3,8 +3,8 @@ package dev.phonecode.tools.web
 import dev.phonecode.tools.Tool
 import dev.phonecode.tools.ToolContext
 import dev.phonecode.tools.ToolResult
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
+import dev.phonecode.tools.http.awaitResponse
+import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.add
@@ -14,22 +14,39 @@ import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonObject
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.HttpUrl
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
+import java.util.concurrent.TimeUnit
+
+internal fun safeWebUrl(url: HttpUrl): Boolean = url.isHttps || url.scheme == "http" &&
+    url.host.lowercase() in setOf("localhost", "127.0.0.1", "::1")
+
+internal fun OkHttpClient.webToolClient(): OkHttpClient = newBuilder()
+    .callTimeout(90, TimeUnit.SECONDS)
+    .readTimeout(60, TimeUnit.SECONDS)
+    .followSslRedirects(false)
+    .addNetworkInterceptor { chain ->
+        require(safeWebUrl(chain.request().url)) { "remote web requests must use HTTPS" }
+        chain.proceed(chain.request())
+    }
+    .build()
 
 /**
  * Fetches a URL over HTTP(S) and returns its content as text (mirrors OpenCode `webfetch`). HTML is reduced
  * to readable text unless `format=html`. Read-only research: visible in PLAN, no permission prompt - but
  * every call shows up as a tool-activity line with its URL, so the user always sees what was fetched.
  */
-class WebFetchTool(private val http: OkHttpClient) : Tool {
+class WebFetchTool(http: OkHttpClient) : Tool {
+    private val webHttp = http.webToolClient()
     override val name = "webfetch"
     override val description =
-        "Fetch a URL over HTTP(S) and return its content. HTML is converted to readable text by default; " +
+        "Fetch an HTTPS URL or local HTTP URL and return its content. HTML is converted to readable text by default; " +
             "pass format=html for raw HTML or format=text/markdown for text. Use to read docs or web pages."
     override val promptSnippet = "fetch a URL and read its content as text"
     override val parameters: JsonObject = buildJsonObject {
         put("type", "object")
         putJsonObject("properties") {
-            putJsonObject("url") { put("type", "string"); put("description", "The http(s) URL to fetch.") }
+            putJsonObject("url") { put("type", "string"); put("description", "The HTTPS URL, or localhost HTTP URL, to fetch.") }
             putJsonObject("format") {
                 put("type", "string")
                 put("description", "text (default) | markdown | html")
@@ -42,33 +59,36 @@ class WebFetchTool(private val http: OkHttpClient) : Tool {
     override suspend fun execute(args: JsonObject, context: ToolContext): ToolResult {
         val url = (args["url"] as? JsonPrimitive)?.takeIf { it.isString }?.content
             ?: return ToolResult("webfetch: missing 'url'", isError = true)
-        if (!url.startsWith("http://") && !url.startsWith("https://")) {
-            return ToolResult("webfetch: url must start with http:// or https://", isError = true)
-        }
+        val target = url.toHttpUrlOrNull()
+        if (target == null || !safeWebUrl(target)) return ToolResult(
+            "webfetch: use HTTPS, or HTTP only for localhost",
+            isError = true,
+        )
         val format = (args["format"] as? JsonPrimitive)?.content ?: "text"
-        return withContext(Dispatchers.IO) {
-            runCatching {
-                val request = Request.Builder().url(url).header("User-Agent", USER_AGENT).get().build()
-                http.newCall(request).execute().use { response ->
-                    if (!response.isSuccessful) {
-                        return@use ToolResult("webfetch: HTTP ${response.code} for $url", isError = true)
-                    }
-                    // Bound the read so a multi-GB body can't be buffered whole just to truncate it later.
-                    val body = response.peekBody(MAX_BYTES).string()
-                    val contentType = response.header("Content-Type").orEmpty()
-                    val rendered = if (format == "html" || !(contentType.contains("html", true) || looksLikeHtml(body))) {
-                        body
-                    } else {
-                        htmlToText(body)
-                    }
-                    val output = if (rendered.length > MAX_CHARS) {
-                        rendered.take(MAX_CHARS) + "\n\n[truncated at $MAX_CHARS characters]"
-                    } else {
-                        rendered
-                    }
-                    ToolResult(output.ifBlank { "(empty response)" })
+        return try {
+            val request = Request.Builder().url(target).header("User-Agent", USER_AGENT).get().build()
+            webHttp.newCall(request).awaitResponse { response ->
+                if (!response.isSuccessful) {
+                    return@awaitResponse ToolResult("webfetch: HTTP ${response.code} for $url", isError = true)
                 }
-            }.getOrElse { ToolResult("webfetch: ${it.message}", isError = true) }
+                val body = response.peekBody(MAX_BYTES).string()
+                val contentType = response.header("Content-Type").orEmpty()
+                val rendered = if (format == "html" || !(contentType.contains("html", true) || looksLikeHtml(body))) {
+                    body
+                } else {
+                    htmlToText(body)
+                }
+                val output = if (rendered.length > MAX_CHARS) {
+                    rendered.take(MAX_CHARS) + "\n\n[truncated at $MAX_CHARS characters]"
+                } else {
+                    rendered
+                }
+                ToolResult(output.ifBlank { "(empty response)" })
+            }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Throwable) {
+            ToolResult("webfetch: ${error.message}", isError = true)
         }
     }
 
@@ -89,7 +109,7 @@ class WebFetchTool(private val http: OkHttpClient) : Tool {
     private companion object {
         const val MAX_CHARS = 100_000
         const val MAX_BYTES = 5_000_000L // raw-body read cap (HTML only shrinks once stripped to text)
-        const val USER_AGENT = "PhoneCode/0.1 (+https://phonecode.dev)"
+        const val USER_AGENT = "PhoneCode/0.4 (+https://dttdrv.xyz/phonecode)"
         val SCRIPT = Regex("(?is)<script.*?</script>")
         val STYLE = Regex("(?is)<style.*?</style>")
         val HEAD = Regex("(?is)<head.*?</head>")

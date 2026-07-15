@@ -1,5 +1,11 @@
 package dev.phonecode.provider.http
 
+import java.io.IOException
+
+internal const val MAX_SSE_EVENT_CHARS = 1024 * 1024
+
+internal class SseLimitException(message: String) : IOException(message)
+
 /** A dispatched SSE event: an optional `event:` type and the joined `data:` payload. */
 data class RawSse(val event: String?, val data: String)
 
@@ -9,7 +15,7 @@ data class RawSse(val event: String?, val data: String)
  * event. Multi-line `data:` fields are joined with '\n' (SSE spec); `:` comment
  * lines and other fields (id, retry) are ignored.
  */
-class SseParser {
+class SseParser(private val maxEventChars: Int = MAX_SSE_EVENT_CHARS) {
     private val data = StringBuilder()
     private var event: String? = null
 
@@ -28,7 +34,12 @@ class SseParser {
             value = line.substring(colon + 1).removePrefix(" ")
         }
         when (field) {
-            "data" -> data.append(value).append('\n')
+            "data" -> {
+                if (data.length + value.length + 1 > maxEventChars) {
+                    throw SseLimitException("SSE event exceeds $maxEventChars characters")
+                }
+                data.append(value).append('\n')
+            }
             "event" -> event = value
             else -> Unit // id, retry, unknown fields
         }

@@ -3,8 +3,8 @@ package dev.phonecode.tools.web
 import dev.phonecode.tools.Tool
 import dev.phonecode.tools.ToolContext
 import dev.phonecode.tools.ToolResult
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
+import dev.phonecode.tools.http.awaitResponse
+import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.add
@@ -24,9 +24,10 @@ import java.net.URLEncoder
  * Read-only research: visible in PLAN, no permission prompt. [endpoint] is injectable so tests can point at a stub.
  */
 class WebSearchTool(
-    private val http: OkHttpClient,
+    http: OkHttpClient,
     private val endpoint: String = DDG_HTML,
 ) : Tool {
+    private val webHttp = http.webToolClient()
     override val name = "websearch"
     override val description =
         "Search the web for current information and return the top results as title + url + snippet (free, no API " +
@@ -54,17 +55,19 @@ class WebSearchTool(
         val count = (args["count"] as? JsonPrimitive)?.content?.toIntOrNull()?.coerceIn(1, MAX_COUNT) ?: DEFAULT_COUNT
         val url = endpoint + (if (endpoint.contains("?")) "&" else "?") + "q=" + URLEncoder.encode(query, "UTF-8")
 
-        return withContext(Dispatchers.IO) {
-            runCatching {
-                val request = Request.Builder().url(url).header("User-Agent", USER_AGENT).get().build()
-                http.newCall(request).execute().use { response ->
-                    if (!response.isSuccessful) {
-                        return@use ToolResult("websearch: HTTP ${response.code} from search backend", isError = true)
-                    }
-                    val results = parseResults(response.body?.string().orEmpty()).take(count)
-                    if (results.isEmpty()) ToolResult("No results for \"$query\".") else ToolResult(format(query, results))
+        return try {
+            val request = Request.Builder().url(url).header("User-Agent", USER_AGENT).get().build()
+            webHttp.newCall(request).awaitResponse { response ->
+                if (!response.isSuccessful) {
+                    return@awaitResponse ToolResult("websearch: HTTP ${response.code} from search backend", isError = true)
                 }
-            }.getOrElse { ToolResult("websearch: ${it.message}", isError = true) }
+                val results = parseResults(response.peekBody(MAX_BYTES).string()).take(count)
+                if (results.isEmpty()) ToolResult("No results for \"$query\".") else ToolResult(format(query, results))
+            }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Throwable) {
+            ToolResult("websearch: ${error.message}", isError = true)
         }
     }
 
@@ -103,7 +106,8 @@ class WebSearchTool(
         const val DDG_HTML = "https://html.duckduckgo.com/html/"
         const val DEFAULT_COUNT = 5
         const val MAX_COUNT = 20
-        const val USER_AGENT = "Mozilla/5.0 (Linux; Android 13) PhoneCode/0.1"
+        const val MAX_BYTES = 2_000_000L
+        const val USER_AGENT = "Mozilla/5.0 (Linux; Android 15) PhoneCode/0.4"
         val TITLE = Regex("<a[^>]*class=\"result__a\"[^>]*href=\"([^\"]+)\"[^>]*>(.*?)</a>", RegexOption.DOT_MATCHES_ALL)
         val SNIPPET = Regex("<a[^>]*class=\"result__snippet\"[^>]*>(.*?)</a>", RegexOption.DOT_MATCHES_ALL)
         val TAG = Regex("<[^>]+>")

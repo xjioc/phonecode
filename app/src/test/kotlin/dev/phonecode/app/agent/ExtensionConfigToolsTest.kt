@@ -38,8 +38,7 @@ class ExtensionConfigToolsTest {
         val repaired = runBlocking {
             tool.execute(
                 buildJsonObject {
-                    put("action", "replace_mcp_config")
-                    put("content", """{"mcp":{}}""")
+                    put("action", "reset_mcp_config")
                 },
                 Context,
             )
@@ -60,6 +59,40 @@ class ExtensionConfigToolsTest {
         assertFalse(repaired.isError)
         assertFalse(skill.isError)
         assertTrue(repository.discoverSkills(project).any { it.name == "live" })
+    }
+
+    @Test fun writeToolRejectsMcpHeaderValues() = withTools { repository, project ->
+        val result = runBlocking {
+            ExtensionConfigWriteTool(repository) { project }.execute(
+                buildJsonObject {
+                    put("action", "upsert_mcp")
+                    put("name", "private")
+                    put("url", "https://example.com/mcp")
+                    put("headers", buildJsonObject { put("Authorization", "Bearer secret-value") })
+                },
+                Context,
+            )
+        }
+
+        assertTrue(result.isError)
+        assertTrue(result.output.contains("Settings"))
+        assertTrue(repository.loadMcpConfig().mcp.isEmpty())
+    }
+
+    @Test fun writeToolAcceptsLoopbackHttpMcp() = withTools { repository, project ->
+        val result = runBlocking {
+            ExtensionConfigWriteTool(repository) { project }.execute(
+                buildJsonObject {
+                    put("action", "upsert_mcp")
+                    put("name", "local")
+                    put("url", "http://127.0.0.1:8080/mcp")
+                },
+                Context,
+            )
+        }
+
+        assertFalse(result.isError)
+        assertTrue(repository.loadMcpConfig().mcp.containsKey("local"))
     }
 
     private fun withTools(block: (McpSkillRepository, java.io.File) -> Unit) {

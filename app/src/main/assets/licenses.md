@@ -29,14 +29,13 @@ NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FO
 OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-## Mermaid 10.9.3
+## Mermaid 10.9.6
 
 MIT License. Copyright (c) 2014-2022 Knut Sveidqvist. Mermaid and its embedded dependency notices
 are tracked in the repository's `THIRD_PARTY.md` inventory.
 
 ## Fonts
 
-- Inter: Copyright 2016 The Inter Project Authors, SIL Open Font License 1.1.
 - JetBrains Mono: Copyright 2020 The JetBrains Mono Project Authors, SIL Open Font License 1.1.
 
 ## Android and JVM libraries

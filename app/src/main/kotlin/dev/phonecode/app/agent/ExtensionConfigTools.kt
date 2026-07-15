@@ -3,6 +3,7 @@ package dev.phonecode.app.agent
 import dev.phonecode.app.data.McpConfigLoad
 import dev.phonecode.app.data.McpSkillRepository
 import dev.phonecode.app.data.SkillScope
+import dev.phonecode.app.data.isSafeMcpEndpoint
 import dev.phonecode.tools.Tool
 import dev.phonecode.tools.ToolContext
 import dev.phonecode.tools.ToolResult
@@ -85,14 +86,13 @@ internal class ExtensionConfigWriteTool(
     override val parameters = buildJsonObject {
         put("type", "object")
         putJsonObject("properties") {
-            enumProperty("action", "upsert_mcp", "remove_mcp", "set_mcp_enabled", "replace_mcp_config", "write_skill", "delete_skill")
+            enumProperty("action", "upsert_mcp", "remove_mcp", "set_mcp_enabled", "reset_mcp_config", "write_skill", "delete_skill")
             enumProperty("scope", "global", "project")
             stringProperty("name")
             stringProperty("original_name")
             stringProperty("url")
             stringProperty("path")
             stringProperty("content")
-            putJsonObject("headers") { put("type", "object") }
             putJsonObject("enabled") { put("type", "boolean") }
             putJsonObject("timeout") { put("type", "integer"); put("minimum", 1000); put("maximum", 60000) }
         }
@@ -110,11 +110,8 @@ internal class ExtensionConfigWriteTool(
             repository.setMcpEnabled(name, enabled)
                 .fold({ ToolResult("MCP server ${if (enabled) "enabled" else "disabled"}") }, { ToolResult("extension_write: ${it.message}", true) })
         }
-        "replace_mcp_config" -> {
-            val content = args.stringOrNull("content") ?: return ToolResult("extension_write: content is required", true)
-            repository.replaceMcpConfig(content)
-                .fold({ ToolResult("MCP configuration replaced") }, { ToolResult("extension_write: ${it.message}", true) })
-        }
+        "reset_mcp_config" -> repository.replaceMcpConfig("""{"mcp":{}}""")
+            .fold({ ToolResult("MCP configuration reset") }, { ToolResult("extension_write: ${it.message}", true) })
         "write_skill" -> {
             val scope = args.scope() ?: return ToolResult("extension_write: scope must be global or project", true)
             val name = args.requiredName() ?: return ToolResult("extension_write: name is required", true)
@@ -132,6 +129,7 @@ internal class ExtensionConfigWriteTool(
     }
 
     private fun upsertMcp(args: JsonObject): ToolResult {
+        if ("headers" in args) return ToolResult("extension_write: set MCP header values in Settings", true)
         val name = args.requiredName() ?: return ToolResult("extension_write: name is required", true)
         val loaded = repository.loadMcpConfigState()
         if (loaded is McpConfigLoad.Invalid) return ToolResult("extension_write: ${loaded.message}", true)
@@ -139,15 +137,12 @@ internal class ExtensionConfigWriteTool(
         val original = args.string("original_name").ifBlank { name.takeIf(servers::containsKey) }
         val current = servers[original ?: name]
         val url = args.string("url").ifBlank { current?.url.orEmpty() }
-        if (!url.startsWith("https://")) return ToolResult("extension_write: use an HTTPS MCP URL", true)
+        if (!isSafeMcpEndpoint(url)) return ToolResult("extension_write: use HTTPS, or HTTP only for localhost", true)
         val timeout = args.long("timeout") ?: current?.timeout ?: 5_000
         if (timeout !in 1_000..60_000) return ToolResult("extension_write: timeout must be between 1000 and 60000 ms", true)
-        val headers = (args["headers"] as? JsonObject)?.mapNotNull { (key, value) ->
-            (value as? JsonPrimitive)?.contentOrNull?.let { key to it }
-        }?.toMap() ?: current?.headers.orEmpty()
         val server = McpServerConfig(
             url = url,
-            headers = headers,
+            headers = current?.headers.orEmpty(),
             enabled = args.boolean("enabled") ?: current?.enabled ?: true,
             timeout = timeout,
         )

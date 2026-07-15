@@ -92,9 +92,10 @@ class TransferBundleTest {
                 entry = zis.nextEntry
             }
         }
-        assertTrue(manifest!!.contains("\"app\":\"phonecode\""))
-        assertTrue(manifest!!.contains("\"version\":1"))
-        assertTrue(manifest!!.contains("\"exportedAt\":"))
+        val content = requireNotNull(manifest)
+        assertTrue(content.contains("\"app\":\"phonecode\""))
+        assertTrue(content.contains("\"version\":1"))
+        assertTrue(content.contains("\"exportedAt\":"))
     }
 
     @Test fun exportSkipsMissingOptionalFiles() {
@@ -105,6 +106,17 @@ class TransferBundleTest {
 
         assertEquals(1, restored)
         assertFalse(File(target, "projects.json").exists())
+    }
+
+    @Test fun largePhotoSessionRoundTripsBeyondTheSettingsFileLimit() {
+        val session = File(source, "sessions/photo.json")
+        session.parentFile?.mkdirs()
+        session.writeText("x".repeat(6 * 1024 * 1024))
+
+        val restored = TransferBundle.import(target, ByteArrayInputStream(exportBytes()))
+
+        assertEquals(1, restored)
+        assertEquals(session.length(), File(target, "sessions/photo.json").length())
     }
 
     @Test fun newerVersionManifestPlacedLastStillRestoresNothing() {
@@ -138,6 +150,18 @@ class TransferBundleTest {
         } catch (expected: java.io.IOException) { }
 
         assertFalse(File(target, "projects.json").exists())
+    }
+
+    @Test fun invalidOrForeignManifestIsRejected() {
+        listOf("not json", """{"app":"other","version":1,"exportedAt":0}""").forEach { manifest ->
+            val zip = ByteArrayOutputStream()
+            ZipOutputStream(zip).use { zos ->
+                zos.putNextEntry(ZipEntry("manifest.json")); zos.write(manifest.toByteArray()); zos.closeEntry()
+                zos.putNextEntry(ZipEntry("projects.json")); zos.write("[]".toByteArray()); zos.closeEntry()
+            }
+            assertTrue(runCatching { TransferBundle.import(target, ByteArrayInputStream(zip.toByteArray())) }.isFailure)
+            assertFalse(File(target, "projects.json").exists())
+        }
     }
 
     @Test fun importOverwritesExistingFiles() {

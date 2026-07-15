@@ -53,26 +53,25 @@ The resolved release graph must be exported into the release SBOM and checked ag
 every release. A dependency-family summary is not a substitute for the final component-level SBOM
 and license bundle.
 
-## Mermaid 10.9.3 bundle
+## Mermaid 10.9.6 bundle
 
 - File: `app/src/main/assets/mermaid.min.js`
-- SHA-256: `5a8ec91820bd55afef049068489369910e5d6ce70c8103952f27e29d3e76e8bc`
-- Exact origin: `mermaid@10.9.3`, `dist/mermaid.min.js`, npm package integrity
-  `sha512-V80X1isSEvAew...EKImBlUfFYArw==`
+- SHA-256: `eda3a0ad572bbe69a318c1be0163e8233dd824f3f12939e5168feba207767151`
+- Exact origin: `mermaid@10.9.6`, `dist/mermaid.min.js`, npm package integrity
+  `sha512-XRjjRaI4aPCAMpVaOhxIwLYdx3U4Cb6mN0M268ggFAfFRqsvyFW8zxWbEZazN/mPkqsVWThb0oa1UawWK+XMNg==`
 - Mermaid license: MIT, Copyright (c) 2014-2022 Knut Sveidqvist
 
 The committed bytes match the published npm package exactly. The single-file build embeds Mermaid's
 runtime dependencies, including sanitize-url, Cytoscape, D3, dagre-d3-es, Day.js, DOMPurify, ELK,
 KaTeX, khroma, Lodash, mdast utilities, Stylis, UUID, and related transitive code. Their exact resolved
-versions and notices are not present in this repository. Mermaid 10.9.6 also backports later security
-fixes that 10.9.3 lacks. Replace the asset with a supported pinned build and publish its generated
-third-party-notice inventory before release.
+versions and notices are not present in this repository. This pinned backport includes the Mermaid
+11.15.0 security fixes for CVE-2026-41148, CVE-2026-41149, CVE-2026-41150, and CVE-2026-41159.
+Publish its generated third-party-notice inventory before release.
 
 ## Fonts
 
 | File | SHA-256 | License |
 | --- | --- | --- |
-| `inter_variable.ttf` | `29160a80ff49ddcab2c97711247e08b1fab27a484a329ce8b813d820dc559031` | SIL Open Font License 1.1, Copyright 2016 The Inter Project Authors |
 | `jetbrainsmono_bold.ttf` | `d22c4f3821d725eb01210d278d95dfcfcaadc34699a06658d47c8a5cc5830ada` | SIL Open Font License 1.1, Copyright 2020 The JetBrains Mono Project Authors |
 | `jetbrainsmono_medium.ttf` | `d16e6dc99672734698d629705f617c79f6eb6040f5113efe3a145204dc988109` | SIL Open Font License 1.1, Copyright 2020 The JetBrains Mono Project Authors |
 | `jetbrainsmono_regular.ttf` | `e6fd0d7e91550b3ed2b735d4312474362c4716edc4fc0577a0f61ed782d5aed1` | SIL Open Font License 1.1, Copyright 2020 The JetBrains Mono Project Authors |
