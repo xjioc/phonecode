@@ -52,7 +52,6 @@ jobs:
             --title "$GITHUB_REF_NAME" \
             --generate-notes \
             --draft \
-            --verify-tag \
             "app/build/outputs/apk/debug/$APK_NAME" \
             "app/build/outputs/apk/debug/$APK_NAME.sha256" || {
             echo "Release may already exist, uploading assets instead"
