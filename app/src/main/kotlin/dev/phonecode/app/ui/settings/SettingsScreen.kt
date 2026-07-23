@@ -1,5 +1,6 @@
 package dev.phonecode.app.ui.settings
 
+import android.annotation.SuppressLint
 import android.content.Intent
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -865,6 +866,7 @@ private fun McpServerPage(
     var confirmDelete by remember(initialName) { mutableStateOf(false) }
     val externalChange = !isNew && currentRevision != acceptedRevision
 
+    @SuppressLint("LocalContextGetResourceValueCall")
     fun validationMessage(): String? {
         val finalName = if (isNew) name.trim() else initialName
         val finalTimeout = timeout.toLongOrNull()
