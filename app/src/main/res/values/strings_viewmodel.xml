@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Guard / busy messages -->
+    <string name="vm_wait_data_op">Wait for the current data operation to finish.</string>
+    <string name="vm_stop_agent_remove_folder">Stop the current agent before removing this folder.</string>
+    <string name="vm_stop_agent_new_chat">Stop the current agent before starting another chat.</string>
+    <string name="vm_stop_agent_open_chat">Stop the current agent before opening another chat.</string>
+    <string name="vm_stop_agent_delete_chat">Stop the current agent before deleting this chat.</string>
+    <string name="vm_stop_agent_delete_project">Stop the current agent before deleting this project.</string>
+    <string name="vm_stop_agent_move_chat">Stop the current agent before moving this chat.</string>
+    <string name="vm_stop_agent_archive_chat">Stop the current agent before archiving this chat.</string>
+    <string name="vm_stop_agent_import">Stop the current agent before importing a backup.</string>
+    <string name="vm_wait_chat_opening">Wait for this chat to finish opening.</string>
+    <string name="vm_wait_turn_photo">Wait for the current turn before sending a photo.</string>
+    <string name="vm_select_model_first">Select a model first.</string>
+    <string name="vm_unknown_provider">Unknown provider: %1$s</string>
+
+    <!-- Error messages -->
+    <string name="vm_error_link_folder">Could not link folder: %1$s</string>
+    <string name="vm_error_remove_folder">Could not remove folder access: %1$s</string>
+    <string name="vm_error_chat_unavailable">This chat is no longer available.</string>
+    <string name="vm_error_create_project">Could not create project: %1$s</string>
+    <string name="vm_error_remove_project">Could not remove project: %1$s</string>
+    <string name="vm_error_report_rate_limit">Too many reports were sent from this network. Try again later.</string>
+    <string name="vm_error_report_unavailable">Reporting is temporarily unavailable. Try again later.</string>
+    <string name="vm_error_report_network">Reporting is temporarily unavailable. Check your connection and try again.</string>
+    <string name="vm_error_codex_signin">Codex sign-in failed: %1$s</string>
+    <string name="vm_error_export">Export failed: %1$s</string>
+    <string name="vm_error_import">Import failed: %1$s</string>
+    <string name="vm_error_turn_stopped">The turn stopped unexpectedly: %1$s Review workspace changes before retrying.</string>
+    <string name="vm_error_provider_config">Provider configuration could not be loaded</string>
+    <string name="vm_error_custom_provider_save">Custom provider could not be saved</string>
+    <string name="vm_error_custom_provider_remove">Custom provider could not be removed</string>
+    <string name="vm_error_mcp_config">MCP configuration could not be saved</string>
+    <string name="vm_error_rollback_suffix">. Some changes could not be restored.</string>
+
+    <!-- Notice messages -->
+    <string name="vm_notice_folder_linked">Folder linked</string>
+    <string name="vm_notice_folder_removed">Folder access removed</string>
+    <string name="vm_notice_folder_removed_files">Folder access removed. Workspace files moved to %1$s.</string>
+    <string name="vm_notice_project_linked">Project linked</string>
+    <string name="vm_notice_bg_work_failed">Android could not keep this work active in the background: %1$s</string>
+    <string name="vm_notice_bg_service_unavailable">service unavailable</string>
+    <string name="vm_notice_codex_signed_in">Signed in with ChatGPT - pick a ChatGPT model from the model menu</string>
+    <string name="vm_notice_github_signed_in">Signed in as @%1$s</string>
+    <string name="vm_notice_backup_exported">Backup exported</string>
+    <string name="vm_notice_restored_files">Restored %1$d file(s)</string>
+
+    <!-- humanizeError(raw) messages -->
+    <string name="vm_err_no_connection">No connection - check your internet and try again.</string>
+    <string name="vm_err_timeout">The request timed out - the provider may be slow or your connection unstable.</string>
+    <string name="vm_err_connection_lost">Connection lost - check your internet and try again.</string>
+    <string name="vm_err_api_key_rejected">The provider rejected your API key - check it in Settings > Providers.</string>
+    <string name="vm_err_rate_limited">Rate limited by the provider - wait a moment and try again.</string>
+    <string name="vm_err_temp_blocked">The provider temporarily blocked this request - wait a few minutes and try again.</string>
+    <string name="vm_err_overloaded">The provider is overloaded right now - try again shortly.</string>
+
+    <!-- humanizeError(error, providerId) messages -->
+    <string name="vm_err_codex_expired">Your ChatGPT sign-in expired. Sign in again in Settings > Providers.</string>
+    <string name="vm_err_api_key_check">The provider rejected your API key. Check it in Settings > Providers.</string>
+    <string name="vm_err_rate_limiting">The provider is rate limiting requests.%1$s</string>
+    <string name="vm_err_opencode_quota">OpenCode Go usage limit reached.%1$s You can enable Zen balance fallback in the OpenCode console.</string>
+    <string name="vm_err_quota_reached">The provider usage limit has been reached.%1$s</string>
+    <string name="vm_err_server_unavailable">The provider is unavailable right now.%1$s</string>
+    <string name="vm_err_parse_failed">The provider returned an unreadable response. Try again or switch models.</string>
+    <string name="vm_retry_suffix">" Try again in %1$s."</string>
+    <string name="vm_turn_interrupted">The previous turn stopped unexpectedly. Review any file changes before retrying.</string>
+
+    <!-- Project removal notices -->
+    <string name="vm_notice_project_removed_files">Project removed. Chats moved to Unsorted; workspace files moved to %1$s.</string>
+    <string name="vm_notice_project_removed">Project removed. Chats moved to Unsorted.</string>
+
+    <!-- Skill errors -->
+    <string name="vm_error_skill_update">Skill could not be updated</string>
+    <string name="vm_error_skill_delete">Skill could not be deleted</string>
+
+    <!-- MCP validation -->
+    <string name="vm_error_server_name_required">Server name is required</string>
+
+    <!-- Tool access labels -->
+    <string name="vm_access_skills">Skills</string>
+    <string name="vm_access_approval_required">Approval required</string>
+    <string name="vm_access_depends_on_action">Depends on action</string>
+    <string name="vm_access_read_only">Read only</string>
+
+    <!-- Auth errors -->
+    <string name="vm_error_github_signin">GitHub sign-in failed: %1$s</string>
+    <string name="vm_error_codex_signin_required">Sign in with ChatGPT in Settings to use Codex.</string>
+    <string name="vm_error_api_key_required">Set an API key for %1$s in Settings.</string>
+    <string name="vm_error_codex_reauth">Sign in with ChatGPT again in Settings.</string>
+
+    <!-- Queue notice -->
+    <string name="vm_notice_queued_dropped">Queued messages were not sent.</string>
+
+    <!-- Interrupted turn -->
+    <string name="vm_turn_interrupted_content">Interrupted before PhoneCode recorded the result. Review workspace changes before retrying.</string>
+</resources>

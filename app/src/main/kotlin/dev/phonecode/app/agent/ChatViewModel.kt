@@ -16,6 +16,7 @@ import dev.phonecode.agent.TurnSettings
 import dev.phonecode.app.auth.CodexAuth
 import dev.phonecode.app.auth.GitHubAuth
 import dev.phonecode.app.PhoneCodeApplication
+import dev.phonecode.app.R
 import dev.phonecode.app.data.AppSettings
 import dev.phonecode.app.data.AppSettingsStore
 import dev.phonecode.app.data.CustomProviderRepository
@@ -393,7 +394,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                             lines = lines,
                             currentSessionId = latest.id,
                             currentProjectId = activeProjectId,
-                            error = if (interrupted) TURN_INTERRUPTED_MESSAGE else it.error,
+                            error = if (interrupted) str(R.string.vm_turn_interrupted) else it.error,
                             interruptedTurn = interrupted,
                             sessionLoading = false,
                         )
@@ -695,7 +696,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             lastProvidersFingerprint = fingerprint
             _state.update { it.copy(providerConfigError = warning) }
         }.onFailure { error ->
-            _state.update { it.copy(providerConfigError = error.message ?: "Provider configuration could not be loaded") }
+            _state.update { it.copy(providerConfigError = error.message ?: str(R.string.vm_error_provider_config)) }
         }
     }
     /** True for user/agent-defined providers (they get a "Remove" action; presets don't). */
@@ -708,7 +709,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 customProviders.save(cfg.copy(provider = cfg.provider + (id to provider)))
                 reloadProvidersNow().getOrThrow()
             }.onFailure { error ->
-                _state.update { it.copy(error = error.message ?: "Custom provider could not be saved") }
+                _state.update { it.copy(error = error.message ?: str(R.string.vm_error_custom_provider_save)) }
             }
         }
 
@@ -722,7 +723,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 keyStore.put(id, "")
                 reloadProvidersNow().getOrThrow()
             }.onFailure { error ->
-                _state.update { it.copy(error = error.message ?: "Custom provider could not be removed") }
+                _state.update { it.copy(error = error.message ?: str(R.string.vm_error_custom_provider_remove)) }
             }
         }
     }
@@ -737,21 +738,21 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun linkSharedFolder(uri: android.net.Uri) {
-        if (_state.value.sessionLoading) return fail("Wait for the current data operation to finish.")
+        if (_state.value.sessionLoading) return fail(str(R.string.vm_wait_data_op))
         viewModelScope.launch(Dispatchers.IO) {
             metadataMutationMutex.withLock {
                 runCatching { sharedFileAccess.link(uri) }
-                    .onSuccess { folders -> _state.update { it.copy(sharedFolders = folders, notice = "Folder linked") } }
-                    .onFailure { error -> _state.update { it.copy(error = "Could not link folder: ${error.message}") } }
+                    .onSuccess { folders -> _state.update { it.copy(sharedFolders = folders, notice = str(R.string.vm_notice_folder_linked)) } }
+                    .onFailure { error -> _state.update { it.copy(error = str(R.string.vm_error_link_folder, error.message)) } }
             }
         }
     }
 
     fun unlinkSharedFolder(id: String) {
-        if (_state.value.sessionLoading) return fail("Wait for the current data operation to finish.")
+        if (_state.value.sessionLoading) return fail(str(R.string.vm_wait_data_op))
         val affected = _state.value.projects.filter { it.folderId == id }
         if (_state.value.isRunning && affected.any { it.id == currentProjectId }) {
-            return fail("Stop the current agent before removing this folder.")
+            return fail(str(R.string.vm_stop_agent_remove_folder))
         }
         _state.update { it.copy(sessionLoading = true) }
         viewModelScope.launch(Dispatchers.IO) {
@@ -776,8 +777,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                         projects = projectStore.list(),
                         sessions = sessionStore.list(),
                         currentProjectId = if (activeRemoved) null else it.currentProjectId,
-                        notice = if (recovered.isEmpty()) "Folder access removed" else
-                            "Folder access removed. Workspace files moved to ${recovered.joinToString { item -> item.relativePath }}.",
+                        notice = if (recovered.isEmpty()) str(R.string.vm_notice_folder_removed) else
+                            str(R.string.vm_notice_folder_removed_files, recovered.joinToString { item -> item.relativePath }),
                     )
                 }
             } catch (error: Throwable) {
@@ -795,8 +796,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                     it.copy(
                         projects = projectStore.list(),
                         sessions = sessionStore.list(),
-                        error = "Could not remove folder access: ${error.message}" +
-                            if (rollbackFailed.isEmpty()) "" else ". Some changes could not be restored.",
+                        error = str(R.string.vm_error_remove_folder, error.message) +
+                            if (rollbackFailed.isEmpty()) "" else str(R.string.vm_error_rollback_suffix),
                     )
                 }
             } finally {
@@ -814,8 +815,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
      * under its folder in the drawer right away instead of existing only in memory.
      */
     fun newChat(projectId: String? = currentProjectId) {
-        if (_state.value.isRunning) return fail("Stop the current agent before starting another chat.")
-        if (_state.value.sessionLoading) return fail("Wait for the current data operation to finish.")
+        if (_state.value.isRunning) return fail(str(R.string.vm_stop_agent_new_chat))
+        if (_state.value.sessionLoading) return fail(str(R.string.vm_wait_data_op))
         sessionSwitchJob?.cancel()
         loadingSessionId = null
         sessionSelection++
@@ -828,7 +829,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         val activeProjectId = setActiveProject(projectId)
         val defaultMode = runCatching { AgentMode.valueOf(appSettings.load().defaultMode) }.getOrDefault(AgentMode.BUILD)
         todoStore.replace(emptyList())
-        sessionStore.create(PersistedSession(sessionId, "New chat", System.currentTimeMillis(), emptyList(), activeProjectId))
+        sessionStore.create(PersistedSession(sessionId, str(R.string.common_new_chat), System.currentTimeMillis(), emptyList(), activeProjectId))
         appSettings.update { it.copy(activeSessionId = sessionId) }
         _state.update {
             it.copy(
@@ -873,8 +874,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             }
             return
         }
-        if (_state.value.isRunning) return fail("Stop the current agent before opening another chat.")
-        if (_state.value.sessionLoading) return fail("Wait for the current data operation to finish.")
+        if (_state.value.isRunning) return fail(str(R.string.vm_stop_agent_open_chat))
+        if (_state.value.sessionLoading) return fail(str(R.string.vm_wait_data_op))
         sessionSwitchJob?.cancel()
         pendingMessages.clear()
         dropIfEmptyPlaceholder()
@@ -888,7 +889,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 withContext(Dispatchers.Main.immediate) {
                     if (selection == sessionSelection) {
                         loadingSessionId = null
-                        _state.update { it.copy(sessionLoading = false, error = "This chat is no longer available.") }
+                        _state.update { it.copy(sessionLoading = false, error = str(R.string.vm_error_chat_unavailable)) }
                     }
                 }
                 return@launch
@@ -913,7 +914,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                         streamingReasoning = "",
                         usageInput = 0,
                         usageOutput = 0,
-                        error = if (interrupted) TURN_INTERRUPTED_MESSAGE else null,
+                        error = if (interrupted) str(R.string.vm_turn_interrupted) else null,
                         interruptedTurn = interrupted,
                         sessionLoading = false,
                         currentSessionId = sessionId,
@@ -936,8 +937,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun deleteSession(id: String) {
-        if (id == sessionId && _state.value.isRunning) return fail("Stop the current agent before deleting this chat.")
-        if (_state.value.sessionLoading && loadingSessionId != id) return fail("Wait for the current data operation to finish.")
+        if (id == sessionId && _state.value.isRunning) return fail(str(R.string.vm_stop_agent_delete_chat))
+        if (_state.value.sessionLoading && loadingSessionId != id) return fail(str(R.string.vm_wait_data_op))
         if (loadingSessionId == id) {
             sessionSwitchJob?.cancel()
             sessionSelection++
@@ -958,7 +959,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun createProject(uri: android.net.Uri) {
-        if (_state.value.sessionLoading) return fail("Wait for the current data operation to finish.")
+        if (_state.value.sessionLoading) return fail(str(R.string.vm_wait_data_op))
         viewModelScope.launch(Dispatchers.IO) {
             metadataMutationMutex.withLock {
             runCatching {
@@ -969,18 +970,18 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 Triple(folders, projectStore.list(), project)
             }.onSuccess { (folders, projects, project) ->
                 withContext(Dispatchers.Main.immediate) {
-                    _state.update { it.copy(sharedFolders = folders, projects = projects, notice = "Project linked") }
+                    _state.update { it.copy(sharedFolders = folders, projects = projects, notice = str(R.string.vm_notice_project_linked)) }
                     newChat(project.id)
                 }
             }.onFailure { error ->
-                _state.update { it.copy(error = "Could not create project: ${error.message}") }
+                _state.update { it.copy(error = str(R.string.vm_error_create_project, error.message)) }
             }
             }
         }
     }
 
     fun renameProject(id: String, name: String) {
-        if (_state.value.sessionLoading) return fail("Wait for the current data operation to finish.")
+        if (_state.value.sessionLoading) return fail(str(R.string.vm_wait_data_op))
         val trimmed = name.trim()
         if (trimmed.isEmpty()) return
         viewModelScope.launch(Dispatchers.IO) {
@@ -993,8 +994,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Delete a project; its chats are detached to "unsorted" rather than removed. */
     fun deleteProject(id: String) {
-        if (currentProjectId == id && _state.value.isRunning) return fail("Stop the current agent before deleting this project.")
-        if (_state.value.sessionLoading) return fail("Wait for the current data operation to finish.")
+        if (currentProjectId == id && _state.value.isRunning) return fail(str(R.string.vm_stop_agent_delete_project))
+        if (_state.value.sessionLoading) return fail(str(R.string.vm_wait_data_op))
         _state.update { it.copy(sessionLoading = true) }
         viewModelScope.launch(Dispatchers.IO) {
             metadataMutationMutex.withLock {
@@ -1021,8 +1022,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                         sharedFolders = folders,
                         sessions = sessionStore.list(),
                         currentProjectId = if (activeRemoved) null else it.currentProjectId,
-                        notice = recovered?.let { item -> "Project removed. Chats moved to Unsorted; workspace files moved to ${item.relativePath}." }
-                            ?: "Project removed. Chats moved to Unsorted.",
+                        notice = recovered?.let { item -> str(R.string.vm_notice_project_removed_files, item.relativePath) }
+                            ?: str(R.string.vm_notice_project_removed),
                     )
                 }
             } catch (error: Throwable) {
@@ -1040,8 +1041,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                     it.copy(
                         projects = projectStore.list(),
                         sessions = sessionStore.list(),
-                        error = "Could not remove project: ${error.message}" +
-                            if (rollbackFailed.isEmpty()) "" else ". Some changes could not be restored.",
+                        error = str(R.string.vm_error_remove_project, error.message) +
+                            if (rollbackFailed.isEmpty()) "" else str(R.string.vm_error_rollback_suffix),
                     )
                 }
             } finally {
@@ -1052,7 +1053,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun renameSession(id: String, title: String) {
-        if (_state.value.sessionLoading) return fail("Wait for the current data operation to finish.")
+        if (_state.value.sessionLoading) return fail(str(R.string.vm_wait_data_op))
         val trimmed = title.trim()
         if (trimmed.isEmpty()) return
         viewModelScope.launch(Dispatchers.IO) {
@@ -1064,8 +1065,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun moveSession(id: String, projectId: String?) {
-        if (id == sessionId && _state.value.isRunning) return fail("Stop the current agent before moving this chat.")
-        if (_state.value.sessionLoading) return fail("Wait for the current data operation to finish.")
+        if (id == sessionId && _state.value.isRunning) return fail(str(R.string.vm_stop_agent_move_chat))
+        if (_state.value.sessionLoading) return fail(str(R.string.vm_wait_data_op))
         val safeProjectId = projectId?.takeIf(PROJECT_ID::matches)
         viewModelScope.launch(Dispatchers.IO) {
             metadataMutationMutex.withLock {
@@ -1081,7 +1082,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun setSessionPinned(id: String, pinned: Boolean) {
-        if (_state.value.sessionLoading) return fail("Wait for the current data operation to finish.")
+        if (_state.value.sessionLoading) return fail(str(R.string.vm_wait_data_op))
         viewModelScope.launch(Dispatchers.IO) {
             metadataMutationMutex.withLock {
                 sessionStore.setPinned(id, pinned)
@@ -1092,8 +1093,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Archiving a chat drops it out of the main list; the active chat falls back to a fresh one. */
     fun setSessionArchived(id: String, archived: Boolean) {
-        if (archived && id == sessionId && _state.value.isRunning) return fail("Stop the current agent before archiving this chat.")
-        if (_state.value.sessionLoading) return fail("Wait for the current data operation to finish.")
+        if (archived && id == sessionId && _state.value.isRunning) return fail(str(R.string.vm_stop_agent_archive_chat))
+        if (_state.value.sessionLoading) return fail(str(R.string.vm_wait_data_op))
         if (archived && id == sessionId) newChat()
         viewModelScope.launch(Dispatchers.IO) {
             metadataMutationMutex.withLock {
@@ -1109,7 +1110,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         expectedServer: McpServerConfig? = null,
     ): Result<Unit> = withContext(Dispatchers.IO) {
         val trimmed = name.trim()
-        if (trimmed.isEmpty()) return@withContext Result.failure(IllegalArgumentException("Server name is required"))
+        if (trimmed.isEmpty()) return@withContext Result.failure(IllegalArgumentException(str(R.string.vm_error_server_name_required)))
         val original = trimmed.takeIf { it in _state.value.mcpServers }
         repo.upsertMcpServer(original, trimmed, server, expectedServer).fold(
             onSuccess = { updated ->
@@ -1118,7 +1119,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 Result.success(Unit)
             },
             onFailure = { failure ->
-                _state.update { it.copy(mcpConfigError = failure.message ?: "MCP configuration could not be saved") }
+                _state.update { it.copy(mcpConfigError = failure.message ?: str(R.string.vm_error_mcp_config)) }
                 Result.failure(failure)
             },
         )
@@ -1221,7 +1222,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch(Dispatchers.IO) {
             repo.setSkillEnabled(id, enabled, workspace).fold(
                 onSuccess = { refreshSkillsNow() },
-                onFailure = { failure -> _state.update { it.copy(error = failure.message ?: "Skill could not be updated") } },
+                onFailure = { failure -> _state.update { it.copy(error = failure.message ?: str(R.string.vm_error_skill_update)) } },
             )
         }
     }
@@ -1230,7 +1231,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch(Dispatchers.IO) {
             repo.deleteSkill(id, workspace).fold(
                 onSuccess = { refreshSkillsNow() },
-                onFailure = { failure -> _state.update { it.copy(error = failure.message ?: "Skill could not be deleted") } },
+                onFailure = { failure -> _state.update { it.copy(error = failure.message ?: str(R.string.vm_error_skill_delete)) } },
             )
         }
     }
@@ -1295,13 +1296,13 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 description = tool.description,
                 source = when {
                     tool.name in remoteNames -> "MCP"
-                    tool.name == "skill" -> "Skills"
+                    tool.name == "skill" -> str(R.string.vm_access_skills)
                     else -> "PhoneCode"
                 },
                 access = when {
-                    tool.mutating -> "Approval required"
-                    tool.name == "process" || tool.name == "git_branch" -> "Depends on action"
-                    else -> "Read only"
+                    tool.mutating -> str(R.string.vm_access_approval_required)
+                    tool.name == "process" || tool.name == "git_branch" -> str(R.string.vm_access_depends_on_action)
+                    else -> str(R.string.vm_access_read_only)
                 },
             )
         }
@@ -1345,12 +1346,12 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                                 .jsonObject["id"]?.jsonPrimitive?.contentOrNull
                         }.getOrNull(),
                     )
-                    429 -> AiReportSubmission(false, error = "Too many reports were sent from this network. Try again later.")
-                    else -> AiReportSubmission(false, error = "Reporting is temporarily unavailable. Try again later.")
+                    429 -> AiReportSubmission(false, error = str(R.string.vm_error_report_rate_limit))
+                    else -> AiReportSubmission(false, error = str(R.string.vm_error_report_unavailable))
                 }
             }
         }.getOrElse {
-            AiReportSubmission(false, error = "Reporting is temporarily unavailable. Check your connection and try again.")
+            AiReportSubmission(false, error = str(R.string.vm_error_report_network))
         }
     }
 
@@ -1360,7 +1361,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         val id = "$prefix-${UUID.randomUUID()}"
         runCatching { foregroundLeases.acquire(id) }.onFailure { error ->
             _state.update {
-                it.copy(notice = "Android could not keep this work active in the background: ${error.message ?: "service unavailable"}")
+                it.copy(notice = str(R.string.vm_notice_bg_work_failed, error.message ?: str(R.string.vm_notice_bg_service_unavailable)))
             }
         }
         slot.getAndSet(id)?.let(foregroundLeases::release)
@@ -1387,19 +1388,19 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 expectedState = expectedState,
                 onError = { message ->
                     viewModelScope.launch(Dispatchers.IO) {
-                        _state.update { it.copy(error = "Codex sign-in failed: $message") }
+                        _state.update { it.copy(error = str(R.string.vm_error_codex_signin, message)) }
                     }
                 },
             ) { code ->
                 viewModelScope.launch(Dispatchers.IO) {
                     runCatching { codexAuth.exchangeCode(code, verifier) }
                         .onSuccess {
-                            _state.update { it.copy(codexConnected = true, notice = "Signed in with ChatGPT - pick a ChatGPT model from the model menu") }
+                            _state.update { it.copy(codexConnected = true, notice = str(R.string.vm_notice_codex_signed_in)) }
                             refreshModels(forceRefresh = true)
                         }
                         .onFailure { e ->
                             codexAuth.stopLoopback()
-                            _state.update { it.copy(error = "Codex sign-in failed: ${e.message}") }
+                            _state.update { it.copy(error = str(R.string.vm_error_codex_signin, e.message)) }
                         }
                 }
             }
@@ -1410,7 +1411,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             url
         }.getOrElse { e ->
             codexAuth.stopLoopback()
-            _state.update { it.copy(error = "Codex sign-in failed: ${e.message}") }
+            _state.update { it.copy(error = str(R.string.vm_error_codex_signin, e.message)) }
             null
         }
     }
@@ -1445,13 +1446,13 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                     _state.update { it.copy(githubAuthCode = device.userCode, githubVerifyUri = device.verificationUri) }
                     val token = githubAuth.pollForToken(device) { githubSignInActive }
                     val login = githubAuth.fetchLogin(token)
-                    _state.update { it.copy(githubLogin = login, githubAuthCode = null, githubVerifyUri = null, notice = "Signed in as @$login") }
+                    _state.update { it.copy(githubLogin = login, githubAuthCode = null, githubVerifyUri = null, notice = str(R.string.vm_notice_github_signed_in, login)) }
                 }.onFailure { e ->
                     _state.update {
                         it.copy(
                             githubAuthCode = null,
                             githubVerifyUri = null,
-                            error = if (e is GitHubAuth.SignInAbandonedException) null else "GitHub sign-in failed: ${e.message}",
+                            error = if (e is GitHubAuth.SignInAbandonedException) null else str(R.string.vm_error_github_signin, e.message),
                         )
                     }
                 }
@@ -1480,14 +1481,14 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                     TransferBundle.export(getApplication<Application>().filesDir, out)
                 } ?: error("could not open destination")
             }
-                .onSuccess { _state.update { it.copy(notice = "Backup exported") } }
-                .onFailure { e -> _state.update { it.copy(error = "Export failed: ${e.message}") } }
+                .onSuccess { _state.update { it.copy(notice = str(R.string.vm_notice_backup_exported)) } }
+                .onFailure { e -> _state.update { it.copy(error = str(R.string.vm_error_export, e.message)) } }
         }
     }
 
     fun importFrom(uri: android.net.Uri, onRestored: () -> Unit = {}) {
-        if (_state.value.isRunning) return fail("Stop the current agent before importing a backup.")
-        if (_state.value.sessionLoading) return fail("Wait for the current data operation to finish.")
+        if (_state.value.isRunning) return fail(str(R.string.vm_stop_agent_import))
+        if (_state.value.sessionLoading) return fail(str(R.string.vm_wait_data_op))
         sessionSwitchJob?.cancel()
         val selection = ++sessionSelection
         pendingMessages.clear()
@@ -1502,7 +1503,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 }
                 val saved = appSettings.load()
                 val loaded = saved.activeSessionId?.let(sessionStore::load) ?: sessionStore.loadLatest()
-                val restored = loaded ?: PersistedSession(newSessionId(), "New chat", System.currentTimeMillis(), emptyList())
+                val restored = loaded ?: PersistedSession(newSessionId(), str(R.string.common_new_chat), System.currentTimeMillis(), emptyList())
                 val safeProjectId = restored.projectId?.takeIf(PROJECT_ID::matches)
                 val repaired = restored.messages.map { it.toDomain() }.let {
                     if (restored.activeTurn) repairInterruptedHistory(it) else it
@@ -1547,7 +1548,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                                 sessions = restored.sessions,
                                 projects = restored.projects,
                                 sessionLoading = false,
-                                notice = "Restored ${restored.count} file(s)",
+                                notice = str(R.string.vm_notice_restored_files, restored.count),
                             )
                         }
                         reloadProviders()
@@ -1557,7 +1558,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 onFailure = { error ->
                     withContext(Dispatchers.Main.immediate) {
                         if (selection == sessionSelection) {
-                            _state.update { it.copy(sessionLoading = false, error = "Import failed: ${error.message}") }
+                            _state.update { it.copy(sessionLoading = false, error = str(R.string.vm_error_import, error.message)) }
                         }
                     }
                 },
@@ -1663,12 +1664,12 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         val text = input.trim()
         if (text.isEmpty() && images.isEmpty()) return false
         if (_state.value.sessionLoading) {
-            fail("Wait for this chat to finish opening.")
+            fail(str(R.string.vm_wait_chat_opening))
             return false
         }
         if (_state.value.isRunning) {
             if (images.isNotEmpty()) {
-                fail("Wait for the current turn before sending a photo.")
+                fail(str(R.string.vm_wait_turn_photo))
                 return false
             }
             // Queue it for the running turn instead of dropping it; the agent picks it up at its next step.
@@ -1677,11 +1678,11 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             return true
         }
         val selected = _state.value.selected ?: run {
-            fail("Select a model first.")
+            fail(str(R.string.vm_select_model_first))
             return false
         }
         val preset = providerFor(selected.providerId) ?: run {
-            fail("Unknown provider: ${selected.providerId}")
+            fail(str(R.string.vm_unknown_provider, selected.providerId))
             return false
         }
         // Codex authenticates with the ChatGPT OAuth token (not an API key); gate on being signed in here,
@@ -1689,7 +1690,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         // the network). Every other provider uses its stored API key directly.
         val isCodex = preset.id == "codex"
         if (keyStore.get(if (isCodex) "codex.access" else providerSecretName(selected.providerId)).isNullOrBlank()) {
-            fail(if (isCodex) "Sign in with ChatGPT in Settings to use Codex." else "Set an API key for ${preset.displayName} in Settings.")
+            fail(if (isCodex) str(R.string.vm_error_codex_signin_required) else str(R.string.vm_error_api_key_required, preset.displayName))
             return false
         }
 
@@ -1762,7 +1763,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 val provider = connectedProvider(preset)
                 if (provider == null) {
                     sessionStore.setActiveTurn(turnSessionId, false, sessionWriteOrder.incrementAndGet())
-                    fail(if (isCodex) "Sign in with ChatGPT again in Settings." else "Set an API key for ${preset.displayName} in Settings.")
+                    fail(if (isCodex) str(R.string.vm_error_codex_reauth) else str(R.string.vm_error_api_key_required, preset.displayName))
                     return@launch
                 }
                 val loop = AgentLoop(
@@ -1798,7 +1799,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                     commitStopped()
                     _state.update {
                         it.copy(
-                            error = "The turn stopped unexpectedly: ${humanizeError(error.message ?: error.javaClass.simpleName)} Review workspace changes before retrying.",
+                            error = str(R.string.vm_error_turn_stopped, humanizeError(error.message ?: error.javaClass.simpleName)),
                             interruptedTurn = false,
                         )
                     }
@@ -1980,7 +1981,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                         retry = null,
                         interruptedTurn = false,
                         queued = emptyList(),
-                        notice = if (queuedWereDropped) "Queued messages were not sent." else it.notice,
+                        notice = if (queuedWereDropped) str(R.string.vm_notice_queued_dropped) else it.notice,
                     )
                 }
             }
@@ -2000,7 +2001,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                         retry = null,
                         interruptedTurn = false,
                         queued = emptyList(),
-                        notice = if (queuedWereDropped) "Queued messages were not sent." else it.notice,
+                        notice = if (queuedWereDropped) str(R.string.vm_notice_queued_dropped) else it.notice,
                     )
                 }
             }
@@ -2021,7 +2022,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         if (expectedGeneration != null && expectedGeneration != generation) return
         val suggestedTitle = snapshot.firstOrNull { it.role == Role.USER }
             ?.parts?.filterIsInstance<MessagePart.Text>()?.firstOrNull()?.text?.take(40)?.takeIf { it.isNotBlank() }
-            ?: "New chat"
+            ?: str(R.string.common_new_chat)
         runCatching {
             if (expectedGeneration != null && expectedGeneration != generation) return@runCatching
             sessionStore.checkpoint(
@@ -2123,6 +2124,10 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         return snapshot
     }
 
+    /** Localized string shortcut using the application context. */
+    private fun str(resId: Int, vararg args: Any): String =
+        getApplication<Application>().getString(resId, *args)
+
     private fun fail(message: String) = _state.update { it.copy(error = humanizeError(message), interruptedTurn = false) }
 
     /**
@@ -2133,41 +2138,41 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         val lower = raw.lowercase()
         return when {
             "unable to resolve host" in lower || "unknownhost" in lower ->
-                "No connection - check your internet and try again."
+                str(R.string.vm_err_no_connection)
             "timeout" in lower || "timed out" in lower ->
-                "The request timed out - the provider may be slow or your connection unstable."
+                str(R.string.vm_err_timeout)
             "connection" in lower && ("refused" in lower || "reset" in lower || "abort" in lower) ->
-                "Connection lost - check your internet and try again."
+                str(R.string.vm_err_connection_lost)
             "401" in lower || "unauthorized" in lower || "invalid api key" in lower || "invalid x-api-key" in lower ->
-                "The provider rejected your API key - check it in Settings > Providers."
+                str(R.string.vm_err_api_key_rejected)
             "429" in lower || "rate limit" in lower ->
-                "Rate limited by the provider - wait a moment and try again."
+                str(R.string.vm_err_rate_limited)
             "high-frequency" in lower || "non-compliant requests" in lower ->
-                "The provider temporarily blocked this request - wait a few minutes and try again."
+                str(R.string.vm_err_temp_blocked)
             "overloaded" in lower || "529" in lower ->
-                "The provider is overloaded right now - try again shortly."
+                str(R.string.vm_err_overloaded)
             else -> raw
         }
     }
 
     private fun humanizeError(error: AgentEvent.Error, providerId: String): String {
-        val retry = error.retryAfterMillis?.let { " Try again in ${formatDuration(it)}." }.orEmpty()
+        val retry = error.retryAfterMillis?.let { str(R.string.vm_retry_suffix, formatDuration(it)) }.orEmpty()
         return when (error.kind) {
             FailureKind.AUTH -> if (providerId == "codex") {
-                "Your ChatGPT sign-in expired. Sign in again in Settings > Providers."
+                str(R.string.vm_err_codex_expired)
             } else {
-                "The provider rejected your API key. Check it in Settings > Providers."
+                str(R.string.vm_err_api_key_check)
             }
-            FailureKind.RATE_LIMIT -> "The provider is rate limiting requests.$retry"
+            FailureKind.RATE_LIMIT -> str(R.string.vm_err_rate_limiting, retry)
             FailureKind.QUOTA -> if (providerId == "opencode-go") {
-                "OpenCode Go usage limit reached.$retry You can enable Zen balance fallback in the OpenCode console."
+                str(R.string.vm_err_opencode_quota, retry)
             } else {
-                "The provider usage limit has been reached.$retry"
+                str(R.string.vm_err_quota_reached, retry)
             }
             FailureKind.INVALID_REQUEST -> error.message
-            FailureKind.SERVER -> "The provider is unavailable right now.$retry"
+            FailureKind.SERVER -> str(R.string.vm_err_server_unavailable, retry)
             FailureKind.NETWORK -> humanizeError(error.message)
-            FailureKind.PARSE -> "The provider returned an unreadable response. Try again or switch models."
+            FailureKind.PARSE -> str(R.string.vm_err_parse_failed)
             FailureKind.UNKNOWN -> humanizeError(error.message)
         }
     }
@@ -2265,9 +2270,6 @@ internal fun repairInterruptedHistory(history: List<ChatMessage>): List<ChatMess
         },
     )
 }
-
-private const val TURN_INTERRUPTED_MESSAGE =
-    "The previous turn stopped unexpectedly. Review any file changes before retrying."
 
 internal fun formatDuration(millis: Long): String {
     val seconds = (millis.coerceAtLeast(0) + 999) / 1_000
