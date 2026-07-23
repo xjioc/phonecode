@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 引导页中文翻译 -->
+<resources>
+    <!-- 欢迎页 -->
+    <string name="onboarding_welcome_headline">用手机构建真实项目</string>
+    <string name="onboarding_welcome_subtitle">在你选择的文件夹中运行 AI 编程智能体，使用你信任的模型和工具。</string>
+    <string name="onboarding_feature_folders_title">真实项目文件夹</string>
+    <string name="onboarding_feature_folders_sub">聊天和文件在一起</string>
+    <string name="onboarding_feature_workspace_title">完整的本地工作区</string>
+    <string name="onboarding_feature_workspace_sub">运行工具和管理源代码</string>
+    <string name="onboarding_feature_model_title">选择你的模型</string>
+    <string name="onboarding_feature_model_sub">登录或使用你自己的提供商密钥</string>
+    <string name="onboarding_get_started">开始使用</string>
+
+    <!-- 连接/设置页 -->
+    <string name="onboarding_setup_title">设置</string>
+    <string name="onboarding_step_indicator">第 %1$d 步，共 %2$d 步</string>
+    <string name="onboarding_connect_headline">准备开始构建</string>
+    <string name="onboarding_connect_subtitle">连接一个模型，然后选择你想要的 workspace 和服务。每个步骤后你都可以回到这里。</string>
+    <string name="onboarding_connect_model_title">连接模型</string>
+    <string name="onboarding_connect_model_required">必填 · 登录或添加提供商密钥</string>
+    <string name="onboarding_connect_folder_title">选择项目文件夹</string>
+    <string name="onboarding_connect_folder_optional">可选 · 使用手机上的文件夹</string>
+    <string name="onboarding_connect_github_title">连接 GitHub</string>
+    <string name="onboarding_connect_github_optional">可选 · 拉取和推送仓库</string>
+    <string name="onboarding_continue">进入 PhoneCode</string>
+    <string name="onboarding_connect_hint">连接一个模型以继续，或跳过以后再说。</string>
+    <string name="onboarding_skip">暂时跳过设置</string>
+</resources>

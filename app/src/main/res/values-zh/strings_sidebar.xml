@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 侧边栏/抽屉字符串（中文翻译）。前缀：sidebar_ -->
+<resources>
+    <!-- 内容描述 -->
+    <string name="sidebar_cd_new_chat_in_project">在 %1$s 中新建聊天</string>
+
+    <!-- 菜单操作 -->
+    <string name="sidebar_delete_project">删除项目</string>
+
+    <!-- 删除确认详情 -->
+    <string name="sidebar_delete_chat_detail">%1$s 将从此设备移除。</string>
+    <string name="sidebar_delete_project_detail">项目关联将被移除，其聊天将移至未分类。工作区文件保留在已恢复项目下。关联的手机文件夹不会被删除。</string>
+</resources>

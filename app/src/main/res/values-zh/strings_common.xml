@@ -1,0 +1,138 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 公共字符串（中文翻译）。前缀：common_ -->
+<resources>
+    <!-- 应用 -->
+    <string name="common_app_name">PhoneCode</string>
+
+    <!-- 导航 / 操作 -->
+    <string name="common_back">返回</string>
+    <string name="common_cancel">取消</string>
+    <string name="common_save">保存</string>
+    <string name="common_delete">删除</string>
+    <string name="common_close">关闭</string>
+    <string name="common_done">完成</string>
+    <string name="common_retry">重试</string>
+    <string name="common_copy">复制</string>
+    <string name="common_send">发送</string>
+    <string name="common_stop">停止</string>
+    <string name="common_search">搜索</string>
+    <string name="common_menu">菜单</string>
+    <string name="common_rename">重命名</string>
+    <string name="common_dismiss">关闭</string>
+    <string name="common_submit">提交</string>
+    <string name="common_next">下一步</string>
+    <string name="common_skip_all">全部跳过</string>
+    <string name="common_allow">允许</string>
+    <string name="common_deny">拒绝</string>
+    <string name="common_discard">放弃</string>
+    <string name="common_keep_editing">继续编辑</string>
+    <string name="common_test">测试</string>
+    <string name="common_reload">重新加载最新版本</string>
+
+    <!-- 状态 -->
+    <string name="common_enabled">已启用</string>
+    <string name="common_off">关闭</string>
+    <string name="common_running">运行中</string>
+    <string name="common_ready">就绪</string>
+    <string name="common_unknown">未知</string>
+    <string name="common_failed">失败</string>
+    <string name="common_loading">加载中…</string>
+    <string name="common_saving">保存中…</string>
+    <string name="common_testing">测试中…</string>
+    <string name="common_sending">发送中…</string>
+
+    <!-- 分区 / 导航目标 -->
+    <string name="common_settings">设置</string>
+    <string name="common_new_chat">新建聊天</string>
+    <string name="common_skills">技能</string>
+    <string name="common_mcp">MCP</string>
+    <string name="common_general">通用</string>
+    <string name="common_appearance">外观</string>
+    <string name="common_personalization">个性化</string>
+    <string name="common_providers">提供商</string>
+    <string name="common_tools">工具</string>
+    <string name="common_git">Git</string>
+    <string name="common_about">关于</string>
+    <string name="common_workspace">工作区</string>
+    <string name="common_data">数据</string>
+    <string name="common_models">模型</string>
+    <string name="common_account">账户</string>
+    <string name="common_details">详情</string>
+    <string name="common_advanced">高级</string>
+    <string name="common_instructions">说明</string>
+    <string name="common_connection">连接</string>
+    <string name="common_version">版本</string>
+    <string name="common_name">名称</string>
+    <string name="common_none">无</string>
+    <string name="common_all">全部</string>
+    <string name="common_all_on">全部开启</string>
+    <string name="common_all_off">全部关闭</string>
+
+    <!-- 侧边栏 / 抽屉 -->
+    <string name="common_projects">项目</string>
+    <string name="common_pinned">已置顶</string>
+    <string name="common_archived">已归档</string>
+    <string name="common_unsorted">未分类</string>
+    <string name="common_today">今天</string>
+    <string name="common_yesterday">昨天</string>
+    <string name="common_previous_7_days">最近 7 天</string>
+    <string name="common_earlier">更早</string>
+    <string name="common_no_chats">暂无聊天</string>
+    <string name="common_link_folder">关联文件夹</string>
+    <string name="common_new_project">新建项目</string>
+    <string name="common_clear_search">清除搜索</string>
+
+    <!-- 内容描述 -->
+    <string name="common_cd_back">返回</string>
+    <string name="common_cd_menu">菜单</string>
+    <string name="common_cd_search">搜索聊天和项目</string>
+    <string name="common_cd_close_search">关闭搜索</string>
+    <string name="common_cd_settings">设置</string>
+    <string name="common_cd_new_chat">新建聊天</string>
+    <string name="common_cd_new_project">新建项目</string>
+    <string name="common_cd_chat_options">聊天选项</string>
+    <string name="common_cd_project_options">项目选项</string>
+    <string name="common_cd_copy">复制</string>
+    <string name="common_cd_send">发送</string>
+    <string name="common_cd_stop">停止</string>
+
+    <!-- 对话框 -->
+    <string name="common_delete_chat_title">删除聊天？</string>
+    <string name="common_delete_project_title">删除项目？</string>
+    <string name="common_rename_chat_title">重命名聊天</string>
+    <string name="common_rename_project_title">重命名项目</string>
+    <string name="common_chat_title_label">聊天标题</string>
+    <string name="common_project_name_label">项目名称</string>
+    <string name="common_move_to">移动到</string>
+    <string name="common_move_to_ellipsis">移动到…</string>
+    <string name="common_pin">置顶</string>
+    <string name="common_unpin">取消置顶</string>
+    <string name="common_archive">归档</string>
+    <string name="common_unarchive">取消归档</string>
+    <string name="common_favourite">收藏</string>
+    <string name="common_unfavourite">取消收藏</string>
+
+    <!-- 搜索 -->
+    <string name="common_search_models">搜索模型</string>
+    <string name="common_search_servers">搜索服务器</string>
+    <string name="common_search_skills">搜索技能</string>
+    <string name="common_search_tools">搜索工具</string>
+    <string name="common_no_results">未找到\"%1$s\"的结果</string>
+
+    <!-- 其他 -->
+    <string name="common_phonecode">PhoneCode</string>
+    <string name="common_private">私有</string>
+    <string name="common_read_write">读写</string>
+    <string name="common_read_only">只读</string>
+    <string name="common_not_tested">未测试</string>
+    <string name="common_connecting">连接中</string>
+    <string name="common_connected">已连接</string>
+    <string name="common_input">输入</string>
+    <string name="common_output">输出</string>
+    <string name="common_global">全局</string>
+    <string name="common_project">项目</string>
+    <string name="common_active">活跃</string>
+    <string name="common_needs_attention">需要关注</string>
+    <string name="common_overridden">已覆盖</string>
+    <string name="common_off_and_overridden">已关闭且被覆盖</string>
+</resources>

@@ -1,0 +1,124 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 聊天页面字符串（中文翻译）。前缀：chat_ -->
+<resources>
+    <!-- 空状态 -->
+    <string name="chat_empty_title">我们来构建什么？</string>
+    <string name="chat_suggestion_web_app">构建一个小型 Web 应用</string>
+    <string name="chat_suggestion_error">解释一条错误信息</string>
+    <string name="chat_suggestion_refactor">重构一个函数</string>
+    <string name="chat_suggestion_git">初始化一个 Git 项目</string>
+
+    <!-- 助手回合 -->
+    <string name="chat_thinking">思考中</string>
+    <string name="chat_cd_redo">重做</string>
+    <string name="chat_cd_report">举报 AI 回复</string>
+
+    <!-- 模型面板 -->
+    <string name="chat_set_up_model">配置模型</string>
+    <string name="chat_cd_switch_model">切换模型</string>
+    <string name="chat_model_fallback">模型</string>
+    <string name="chat_model_and_reasoning">模型与推理</string>
+    <string name="chat_agent_mode">智能体模式</string>
+    <string name="chat_mode_plan">规划</string>
+    <string name="chat_mode_build">构建</string>
+    <string name="chat_reasoning">推理</string>
+    <string name="chat_not_available">不可用</string>
+    <string name="chat_favourites">收藏</string>
+    <string name="chat_provider_needs_setup">%1$s · 需要配置</string>
+    <string name="chat_provider_setup_required">需要配置提供商</string>
+    <string name="chat_reasoning_auto">自动</string>
+    <string name="chat_reasoning_extra_high">极高</string>
+
+    <!-- 上下文用量 -->
+    <string name="chat_cd_context_usage">上下文使用率百分之 %1$d</string>
+    <string name="chat_tokens_this_turn">本轮令牌数</string>
+    <string name="chat_context_tokens_ratio">%1$s / %2$s 令牌</string>
+
+    <!-- 输入框 -->
+    <string name="chat_message_placeholder">输入消息…</string>
+    <string name="chat_opening_chat">正在打开聊天…</string>
+    <string name="chat_cd_remove_photo">移除照片</string>
+    <string name="chat_cd_attach">附加照片或文件</string>
+    <string name="chat_cd_message">消息</string>
+
+    <!-- 错误 / 通知 -->
+    <string name="chat_error_read_photo">无法读取该照片。</string>
+    <string name="chat_error_read_file">无法读取该文件。</string>
+    <string name="chat_error_choose_file">请选择一张照片或文本文件。</string>
+    <string name="chat_retrying_connection">正在重试连接 · 第 %1$d 次尝试 · %2$s</string>
+
+    <!-- 举报流程 -->
+    <string name="chat_report_title">举报 AI 回复</string>
+    <string name="chat_cd_cancel_report">取消举报</string>
+    <string name="chat_report_sent">举报已发送</string>
+    <string name="chat_report_thanks">感谢反馈。您的举报将用于改进 PhoneCode 的安全机制。</string>
+    <string name="chat_report_reference">参考编号：%1$s</string>
+    <string name="chat_report_description">请选择出现的问题。PhoneCode 仅发送此分类、您的可选备注和基本应用信息。</string>
+    <string name="chat_report_reason">原因</string>
+    <string name="chat_report_what_happened">发生了什么？（可选）</string>
+    <string name="chat_report_note_placeholder">请描述问题，不要粘贴隐私信息。</string>
+    <string name="chat_report_note_count">%1$d/1000</string>
+    <string name="chat_report_privacy_note">回复内容、提示词、文件、凭据、工具活动、聊天记录和设备标识均不会被附带。</string>
+
+    <!-- 举报分类 -->
+    <string name="chat_report_cat_hate">仇恨</string>
+    <string name="chat_report_cat_hate_detail">仇恨或非人化内容</string>
+    <string name="chat_report_cat_harassment">骚扰</string>
+    <string name="chat_report_cat_harassment_detail">欺凌、威胁或针对性辱骂</string>
+    <string name="chat_report_cat_sexual">色情内容</string>
+    <string name="chat_report_cat_sexual_detail">色情或剥削性材料</string>
+    <string name="chat_report_cat_violence">暴力</string>
+    <string name="chat_report_cat_violence_detail">暴力威胁或有害指令</string>
+    <string name="chat_report_cat_self_harm">自我伤害</string>
+    <string name="chat_report_cat_self_harm_detail">鼓励自我伤害</string>
+    <string name="chat_report_cat_illegal">违法或恶意</string>
+    <string name="chat_report_cat_illegal_detail">诈骗、恶意软件或未授权访问</string>
+    <string name="chat_report_cat_privacy">隐私</string>
+    <string name="chat_report_cat_privacy_detail">暴露隐私或敏感信息</string>
+    <string name="chat_report_cat_other">其他</string>
+    <string name="chat_report_cat_other_detail">其他有害或不当回复</string>
+
+    <!-- 工具活动 -->
+    <string name="chat_tool_reading_file">正在读取文件</string>
+    <string name="chat_tool_read_file">已读取文件</string>
+    <string name="chat_tool_writing_file">正在写入文件</string>
+    <string name="chat_tool_wrote_file">已写入文件</string>
+    <string name="chat_tool_editing_code">正在编辑代码</string>
+    <string name="chat_tool_edited_code">已编辑代码</string>
+    <string name="chat_tool_browsing_files">正在浏览文件</string>
+    <string name="chat_tool_browsed_files">已浏览文件</string>
+    <string name="chat_tool_searching_code">正在搜索代码</string>
+    <string name="chat_tool_searched_code">已搜索代码</string>
+    <string name="chat_tool_running_command">正在执行命令</string>
+    <string name="chat_tool_ran_command">已执行命令</string>
+    <string name="chat_tool_searching_web">正在搜索网络</string>
+    <string name="chat_tool_searched_web">已搜索网络</string>
+    <string name="chat_tool_opening_webpage">正在打开网页</string>
+    <string name="chat_tool_opened_webpage">已打开网页</string>
+    <string name="chat_tool_running_git">正在执行 Git</string>
+    <string name="chat_tool_git_action">Git · %1$s</string>
+    <string name="chat_tool_asked_question">提出了一个问题</string>
+    <string name="chat_tool_delegating_task">正在委派任务</string>
+    <string name="chat_tool_completed_delegated_task">已完成委派任务</string>
+    <string name="chat_tool_loading_skill">正在加载技能</string>
+    <string name="chat_tool_loaded_skill">已加载技能</string>
+    <string name="chat_tool_updating_tasks">正在更新任务</string>
+    <string name="chat_tool_updated_tasks">已更新任务</string>
+    <string name="chat_tool_none">（无）</string>
+    <string name="chat_tool_no_output">（无输出）</string>
+    <string name="chat_tool_waiting_output">等待输出…</string>
+    <string name="chat_tool_copy_details">复制详情</string>
+
+    <!-- 任务面板 -->
+    <string name="chat_tasks_progress">任务 %1$d/%2$d</string>
+
+    <!-- 权限对话框 -->
+    <string name="chat_allow_tool">允许 %1$s？</string>
+
+    <!-- 提问对话框 -->
+    <string name="chat_question">问题</string>
+    <string name="chat_question_page">第 %1$d 题，共 %2$d 题</string>
+    <string name="chat_question_multi_hint">选择所有适用的选项，或自行输入。</string>
+    <string name="chat_question_single_hint">选择一个选项，或自行输入。</string>
+    <string name="chat_question_custom">其他</string>
+</resources>
