@@ -418,6 +418,7 @@ private fun AgentToolsPage(vm: ChatViewModel, onBack: () -> Unit) {
 @Composable
 private fun GeneralPage(settingsVm: SettingsViewModel, onBack: () -> Unit) {
     val settings by settingsVm.settings.collectAsStateWithLifecycle()
+    val context = LocalContext.current
     Page(stringResource(R.string.common_general), onBack) {
         PcSectionLabel(stringResource(R.string.settings_defaults))
         PcGroup {
@@ -432,6 +433,30 @@ private fun GeneralPage(settingsVm: SettingsViewModel, onBack: () -> Unit) {
                 }
             }
             ToggleRow(stringResource(R.string.settings_send_on_enter), checked = settings.sendOnEnter) { v -> settingsVm.update { it.copy(sendOnEnter = v) } }
+        }
+        PcSectionLabel(stringResource(R.string.settings_language))
+        PcGroup {
+            CheckRow(
+                stringResource(R.string.settings_language_system),
+                selected = settings.language == "SYSTEM",
+            ) {
+                settingsVm.update { it.copy(language = "SYSTEM") }
+                (context as? androidx.activity.ComponentActivity)?.recreate()
+            }
+            CheckRow(
+                stringResource(R.string.settings_language_en),
+                selected = settings.language == "en",
+            ) {
+                settingsVm.update { it.copy(language = "en") }
+                (context as? androidx.activity.ComponentActivity)?.recreate()
+            }
+            CheckRow(
+                stringResource(R.string.settings_language_zh),
+                selected = settings.language == "zh",
+            ) {
+                settingsVm.update { it.copy(language = "zh") }
+                (context as? androidx.activity.ComponentActivity)?.recreate()
+            }
         }
     }
 }

@@ -21,6 +21,10 @@
     <string name="settings_defaults">Defaults</string>
     <string name="settings_default_mode">Default mode: %1$s</string>
     <string name="settings_send_on_enter">Send on Enter</string>
+    <string name="settings_language">Language</string>
+    <string name="settings_language_system">Follow system</string>
+    <string name="settings_language_en">English</string>
+    <string name="settings_language_zh">中文</string>
 
     <!-- FilesPage -->
     <string name="settings_private_workspace">Private project workspace</string>
