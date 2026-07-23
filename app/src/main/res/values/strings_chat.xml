@@ -1,0 +1,124 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Chat screen strings. Prefix: chat_ -->
+<resources>
+    <!-- Empty state -->
+    <string name="chat_empty_title">What should we build?</string>
+    <string name="chat_suggestion_web_app">Build a small web app</string>
+    <string name="chat_suggestion_error">Explain an error message</string>
+    <string name="chat_suggestion_refactor">Refactor a function</string>
+    <string name="chat_suggestion_git">Set up a git project</string>
+
+    <!-- Assistant turn -->
+    <string name="chat_thinking">Thinking</string>
+    <string name="chat_cd_redo">Redo</string>
+    <string name="chat_cd_report">Report AI response</string>
+
+    <!-- Model sheet -->
+    <string name="chat_set_up_model">Set up model</string>
+    <string name="chat_cd_switch_model">Switch model</string>
+    <string name="chat_model_fallback">Model</string>
+    <string name="chat_model_and_reasoning">Model &amp; reasoning</string>
+    <string name="chat_agent_mode">Agent mode</string>
+    <string name="chat_mode_plan">Plan</string>
+    <string name="chat_mode_build">Build</string>
+    <string name="chat_reasoning">Reasoning</string>
+    <string name="chat_not_available">Not available</string>
+    <string name="chat_favourites">Favourites</string>
+    <string name="chat_provider_needs_setup">%1$s · Setup required</string>
+    <string name="chat_provider_setup_required">Provider setup required</string>
+    <string name="chat_reasoning_auto">Auto</string>
+    <string name="chat_reasoning_extra_high">Extra high</string>
+
+    <!-- Context usage -->
+    <string name="chat_cd_context_usage">Context usage %1$d percent</string>
+    <string name="chat_tokens_this_turn">tokens this turn</string>
+    <string name="chat_context_tokens_ratio">%1$s / %2$s tokens</string>
+
+    <!-- Composer -->
+    <string name="chat_message_placeholder">Message…</string>
+    <string name="chat_opening_chat">Opening chat…</string>
+    <string name="chat_cd_remove_photo">Remove photo</string>
+    <string name="chat_cd_attach">Attach photo or file</string>
+    <string name="chat_cd_message">Message</string>
+
+    <!-- Errors / notices -->
+    <string name="chat_error_read_photo">Couldn\'t read that photo.</string>
+    <string name="chat_error_read_file">Couldn\'t read that file.</string>
+    <string name="chat_error_choose_file">Choose a photo or text file.</string>
+    <string name="chat_retrying_connection">Retrying connection · attempt %1$d · %2$s</string>
+
+    <!-- Report flow -->
+    <string name="chat_report_title">Report AI response</string>
+    <string name="chat_cd_cancel_report">Cancel report</string>
+    <string name="chat_report_sent">Report sent</string>
+    <string name="chat_report_thanks">Thank you. Your report will be used to improve PhoneCode\'s safeguards.</string>
+    <string name="chat_report_reference">Reference: %1$s</string>
+    <string name="chat_report_description">Choose what went wrong. PhoneCode sends only this category, your optional note, and basic app information.</string>
+    <string name="chat_report_reason">Reason</string>
+    <string name="chat_report_what_happened">What happened? (optional)</string>
+    <string name="chat_report_note_placeholder">Describe the problem without pasting private information.</string>
+    <string name="chat_report_note_count">%1$d/1000</string>
+    <string name="chat_report_privacy_note">The response, prompt, files, credentials, tool activity, chat history, and device identifiers are never attached.</string>
+
+    <!-- Report categories -->
+    <string name="chat_report_cat_hate">Hate</string>
+    <string name="chat_report_cat_hate_detail">Hateful or dehumanizing content</string>
+    <string name="chat_report_cat_harassment">Harassment</string>
+    <string name="chat_report_cat_harassment_detail">Bullying, threats, or targeted abuse</string>
+    <string name="chat_report_cat_sexual">Sexual content</string>
+    <string name="chat_report_cat_sexual_detail">Sexual or exploitative material</string>
+    <string name="chat_report_cat_violence">Violence</string>
+    <string name="chat_report_cat_violence_detail">Violent threats or harmful instructions</string>
+    <string name="chat_report_cat_self_harm">Self-harm</string>
+    <string name="chat_report_cat_self_harm_detail">Encouragement of self-harm</string>
+    <string name="chat_report_cat_illegal">Illegal or malicious</string>
+    <string name="chat_report_cat_illegal_detail">Scams, malware, or unauthorized access</string>
+    <string name="chat_report_cat_privacy">Privacy</string>
+    <string name="chat_report_cat_privacy_detail">Exposure of private or sensitive information</string>
+    <string name="chat_report_cat_other">Other</string>
+    <string name="chat_report_cat_other_detail">Another harmful or inappropriate response</string>
+
+    <!-- Tool activity -->
+    <string name="chat_tool_reading_file">Reading file</string>
+    <string name="chat_tool_read_file">Read file</string>
+    <string name="chat_tool_writing_file">Writing file</string>
+    <string name="chat_tool_wrote_file">Wrote file</string>
+    <string name="chat_tool_editing_code">Editing code</string>
+    <string name="chat_tool_edited_code">Edited code</string>
+    <string name="chat_tool_browsing_files">Browsing files</string>
+    <string name="chat_tool_browsed_files">Browsed files</string>
+    <string name="chat_tool_searching_code">Searching code</string>
+    <string name="chat_tool_searched_code">Searched code</string>
+    <string name="chat_tool_running_command">Running command</string>
+    <string name="chat_tool_ran_command">Ran command</string>
+    <string name="chat_tool_searching_web">Searching the web</string>
+    <string name="chat_tool_searched_web">Searched the web</string>
+    <string name="chat_tool_opening_webpage">Opening webpage</string>
+    <string name="chat_tool_opened_webpage">Opened webpage</string>
+    <string name="chat_tool_running_git">Running Git</string>
+    <string name="chat_tool_git_action">Git · %1$s</string>
+    <string name="chat_tool_asked_question">Asked a question</string>
+    <string name="chat_tool_delegating_task">Delegating task</string>
+    <string name="chat_tool_completed_delegated_task">Completed delegated task</string>
+    <string name="chat_tool_loading_skill">Loading skill</string>
+    <string name="chat_tool_loaded_skill">Loaded skill</string>
+    <string name="chat_tool_updating_tasks">Updating tasks</string>
+    <string name="chat_tool_updated_tasks">Updated tasks</string>
+    <string name="chat_tool_none">(none)</string>
+    <string name="chat_tool_no_output">(no output)</string>
+    <string name="chat_tool_waiting_output">Waiting for output…</string>
+    <string name="chat_tool_copy_details">Copy details</string>
+
+    <!-- Todo panel -->
+    <string name="chat_tasks_progress">Tasks %1$d/%2$d</string>
+
+    <!-- Permission dialog -->
+    <string name="chat_allow_tool">Allow %1$s?</string>
+
+    <!-- Question dialog -->
+    <string name="chat_question">Question</string>
+    <string name="chat_question_page">%1$d of %2$d</string>
+    <string name="chat_question_multi_hint">Choose any that apply, or write your own.</string>
+    <string name="chat_question_single_hint">Choose one, or write your own.</string>
+    <string name="chat_question_custom">Something else</string>
+</resources>

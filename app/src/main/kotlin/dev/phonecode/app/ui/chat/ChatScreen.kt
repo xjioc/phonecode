@@ -3,6 +3,7 @@ package dev.phonecode.app.ui.chat
 import android.Manifest
 import android.annotation.SuppressLint
 import android.content.pm.PackageManager
+import androidx.annotation.StringRes
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.ImageDecoder
@@ -147,6 +148,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
@@ -259,17 +261,20 @@ fun ChatScreen(
     val attachContext = LocalContext.current
     var notificationRequested by rememberSaveable { mutableStateOf(false) }
     val notificationPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
+    val errReadPhoto = stringResource(R.string.chat_error_read_photo)
+    val errReadFile = stringResource(R.string.chat_error_read_file)
+    val errChooseFile = stringResource(R.string.chat_error_choose_file)
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
         if (uri != null) scope.launch {
             val mime = attachContext.contentResolver.getType(uri).orEmpty()
             if (mime.startsWith("image/")) {
                 val photo = withContext(Dispatchers.IO) { readPhoto(attachContext, uri) }
-                if (photo == null) vm.surfaceError("Couldn't read that photo.") else photos = listOf(photo)
+                if (photo == null) vm.surfaceError(errReadPhoto) else photos = listOf(photo)
             } else {
                 val attached = withContext(Dispatchers.IO) { readAttachment(attachContext, uri) }
                 when (attached) {
-                    null -> vm.surfaceError("Couldn't read that file.")
-                    is Attachment.Binary -> vm.surfaceError("Choose a photo or text file.")
+                    null -> vm.surfaceError(errReadFile)
+                    is Attachment.Binary -> vm.surfaceError(errChooseFile)
                     is Attachment.Text -> input = buildString {
                         append(input)
                         if (input.isNotBlank()) append("\n\n")
@@ -471,7 +476,7 @@ fun ChatScreen(
         )
         Box(Modifier.align(Alignment.TopStart).padding(top = statusInset + 6.dp, start = 12.dp).clip(ShapePill).background(colors.surfaceContainerHigh)) {
             // Opening the drawer clears any open overlay so Back/scrim semantics stay unambiguous.
-            PcIconButton(Icons.Filled.Menu, "Menu") { modelOpen = false; onOpenDrawer() }
+            PcIconButton(Icons.Filled.Menu, stringResource(R.string.common_cd_menu)) { modelOpen = false; onOpenDrawer() }
         }
         Column(
             Modifier.align(Alignment.TopCenter).padding(top = statusInset + 6.dp),
@@ -496,12 +501,12 @@ fun ChatScreen(
                 horizontalArrangement = Arrangement.spacedBy(1.dp),
             ) {
                 Text(
-                    if (state.selected?.let { vm.providerConfigured(it.providerId) } == true) modelShortLabel(state) else "Set up model",
+                    if (state.selected?.let { vm.providerConfigured(it.providerId) } == true) modelShortLabel(state) else stringResource(R.string.chat_set_up_model),
                     style = MaterialTheme.typography.labelSmall,
                     color = if (state.selected?.let { vm.providerConfigured(it.providerId) } == true) colors.secondary else colors.error,
                     maxLines = 1,
                 )
-                Icon(Icons.Filled.KeyboardArrowDown, "Switch model", tint = colors.secondary, modifier = Modifier.size(15.dp))
+                Icon(Icons.Filled.KeyboardArrowDown, stringResource(R.string.chat_cd_switch_model), tint = colors.secondary, modifier = Modifier.size(15.dp))
             }
         }
         Row(
@@ -515,7 +520,7 @@ fun ChatScreen(
             Box(
                 Modifier.size(48.dp).clip(ShapePill).background(colors.surfaceContainerHigh)
                     .clickable { modelOpen = false; contextOpen = true }
-                    .semantics { contentDescription = "Context usage ${(ctxFrac.coerceIn(0f, 1f) * 100).toInt()} percent" },
+                    .semantics { contentDescription = stringResource(R.string.chat_cd_context_usage, (ctxFrac.coerceIn(0f, 1f) * 100).toInt()) },
                 contentAlignment = Alignment.Center,
             ) {
                 ContextRing(fraction = ctxFrac, modifier = Modifier.size(22.dp), stroke = 2.5f, color = contextUsageColor(ctxFrac))
@@ -563,7 +568,7 @@ fun ChatScreen(
             ) { error ->
                 if (error != null) ErrorBanner(
                     text = error,
-                    actionLabel = if (state.interruptedTurn) "Retry" else null,
+                    actionLabel = if (state.interruptedTurn) stringResource(R.string.common_retry) else null,
                     onAction = vm::redo,
                     onDismiss = vm::clearError,
                 )
@@ -576,7 +581,7 @@ fun ChatScreen(
                 },
                 label = "retryBanner",
             ) { retry ->
-                if (retry != null) NoticeBanner("Retrying connection · attempt ${retry.attempt} · ${retry.message}")
+                if (retry != null) NoticeBanner(stringResource(R.string.chat_retrying_connection, retry.attempt, retry.message))
             }
             AnimatedContent(
                 targetState = state.notice,
@@ -593,7 +598,7 @@ fun ChatScreen(
             }
             if (state.todos.isNotEmpty()) TodoPanel(state.todos)
             if (state.queued.isNotEmpty()) QueuedMessages(state.queued)
-            if (state.sessionLoading) NoticeBanner("Opening chat…")
+            if (state.sessionLoading) NoticeBanner(stringResource(R.string.chat_opening_chat))
             Composer(
                 state = state,
                 input = input,
@@ -699,14 +704,16 @@ private fun Modifier.messageEnter(animate: Boolean): Modifier {
     }
 }
 
+@Composable
 private fun chatTitle(state: ChatUiState): String =
     state.sessions.firstOrNull { it.id == state.currentSessionId }?.title
         ?: state.lines.filterIsInstance<ChatLine.User>().firstOrNull()?.text?.take(40)
-        ?: "New chat"
+        ?: stringResource(R.string.common_new_chat)
 
 /** Compact model name for the composer pill (drops any "Provider ·" prefix). */
+@Composable
 private fun modelShortLabel(state: ChatUiState): String =
-    state.selected?.label?.substringAfterLast('·')?.trim()?.take(24) ?: "Model"
+    state.selected?.label?.substringAfterLast('·')?.trim()?.take(24) ?: stringResource(R.string.chat_model_fallback)
 
 /** The Reasoning line immediately preceding lines[i], folded into the assistant turn it belongs to. */
 private fun reasoningBefore(lines: List<ChatLine>, i: Int): String? =
@@ -720,14 +727,15 @@ private fun EmptyState(onSuggestion: (String) -> Unit, modifier: Modifier = Modi
     Column(modifier.padding(Spacing.xl), horizontalAlignment = Alignment.CenterHorizontally) {
         Icon(painter = painterResource(R.drawable.ic_phonecode_mark), contentDescription = null, tint = colors.onBackground, modifier = Modifier.size(48.dp))
         Spacer(Modifier.height(14.dp))
-        Text("What should we build?", style = MaterialTheme.typography.titleLarge, color = colors.onBackground)
+        Text(stringResource(R.string.chat_empty_title), style = MaterialTheme.typography.titleLarge, color = colors.onBackground)
         Spacer(Modifier.height(20.dp))
         listOf(
-            "Build a small web app",
-            "Explain an error message",
-            "Refactor a function",
-            "Set up a git project",
-        ).forEach { suggestion ->
+            R.string.chat_suggestion_web_app,
+            R.string.chat_suggestion_error,
+            R.string.chat_suggestion_refactor,
+            R.string.chat_suggestion_git,
+        ).forEach { resId ->
+            val suggestion = stringResource(resId)
             val chipInteraction = remember(suggestion) { MutableInteractionSource() }
             Text(
                 suggestion,
@@ -850,7 +858,7 @@ private fun AssistantTurn(
                         // Actively thinking (no answer text yet): the shimmer sweep.
                         val phase by rememberNeuralPhase(3000)
                         Text(
-                            "Thinking",
+                            stringResource(R.string.chat_thinking),
                             style = MaterialTheme.typography.labelMedium.copy(
                                 brush = neuralSweepBrush(phase, ink = colors.onBackground, extent = 220f),
                                 fontWeight = FontWeight.SemiBold,
@@ -858,7 +866,7 @@ private fun AssistantTurn(
                         )
                     } else {
                         // Reasoning finished (answer streaming or turn complete) - say so.
-                        Text("Done", style = MaterialTheme.typography.labelMedium, color = colors.tertiary)
+                        Text(stringResource(R.string.common_done), style = MaterialTheme.typography.labelMedium, color = colors.tertiary)
                     }
                 }
             }
@@ -911,13 +919,13 @@ private fun AssistantTurn(
                         transitionSpec = { fadeIn(tween(140)) togetherWith fadeOut(tween(120)) },
                         label = "copyCheck",
                     ) { isCopied ->
-                        ActionIcon(if (isCopied) Icons.Filled.Check else Icons.Filled.ContentCopy, "Copy") {
+                        ActionIcon(if (isCopied) Icons.Filled.Check else Icons.Filled.ContentCopy, stringResource(R.string.common_cd_copy)) {
                             clipboard.setText(AnnotatedString(copyText)); copied = true; onCopy()
                         }
                     }
-                    ActionIcon(Icons.Filled.Refresh, "Redo", onRedo)
+                    ActionIcon(Icons.Filled.Refresh, stringResource(R.string.chat_cd_redo), onRedo)
                 }
-                if (showReport) ActionIcon(Icons.Outlined.Flag, "Report AI response", onReport)
+                if (showReport) ActionIcon(Icons.Outlined.Flag, stringResource(R.string.chat_cd_report), onReport)
                 if (showActions && completedAt != null) {
                     Text(
                         formatCompletionDate(completedAt),
@@ -931,17 +939,17 @@ private fun AssistantTurn(
     }
 }
 
-private data class ReportCategory(val id: String, val title: String, val detail: String)
+private data class ReportCategory(val id: String, @StringRes val title: Int, @StringRes val detail: Int)
 
 private val REPORT_CATEGORIES = listOf(
-    ReportCategory("hate", "Hate", "Hateful or dehumanizing content"),
-    ReportCategory("harassment", "Harassment", "Bullying, threats, or targeted abuse"),
-    ReportCategory("sexual", "Sexual content", "Sexual or exploitative material"),
-    ReportCategory("violence", "Violence", "Violent threats or harmful instructions"),
-    ReportCategory("self_harm", "Self-harm", "Encouragement of self-harm"),
-    ReportCategory("illegal", "Illegal or malicious", "Scams, malware, or unauthorized access"),
-    ReportCategory("privacy", "Privacy", "Exposure of private or sensitive information"),
-    ReportCategory("other", "Other", "Another harmful or inappropriate response"),
+    ReportCategory("hate", R.string.chat_report_cat_hate, R.string.chat_report_cat_hate_detail),
+    ReportCategory("harassment", R.string.chat_report_cat_harassment, R.string.chat_report_cat_harassment_detail),
+    ReportCategory("sexual", R.string.chat_report_cat_sexual, R.string.chat_report_cat_sexual_detail),
+    ReportCategory("violence", R.string.chat_report_cat_violence, R.string.chat_report_cat_violence_detail),
+    ReportCategory("self_harm", R.string.chat_report_cat_self_harm, R.string.chat_report_cat_self_harm_detail),
+    ReportCategory("illegal", R.string.chat_report_cat_illegal, R.string.chat_report_cat_illegal_detail),
+    ReportCategory("privacy", R.string.chat_report_cat_privacy, R.string.chat_report_cat_privacy_detail),
+    ReportCategory("other", R.string.chat_report_cat_other, R.string.chat_report_cat_other_detail),
 )
 
 @Composable
@@ -973,19 +981,19 @@ private fun AiReportFlow(
                 ) {
                     Icon(Icons.Filled.Check, null, tint = MaterialTheme.colorScheme.onBackground, modifier = Modifier.size(36.dp))
                     Spacer(Modifier.height(14.dp))
-                    Text("Report sent", style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.onBackground)
+                    Text(stringResource(R.string.chat_report_sent), style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.onBackground)
                     Spacer(Modifier.height(8.dp))
                     Text(
-                        "Thank you. Your report will be used to improve PhoneCode's safeguards.",
+                        stringResource(R.string.chat_report_thanks),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.secondary,
                     )
                     reference?.let {
                         Spacer(Modifier.height(10.dp))
-                        Text("Reference: $it", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.tertiary)
+                        Text(stringResource(R.string.chat_report_reference, it), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.tertiary)
                     }
                     Spacer(Modifier.height(20.dp))
-                    TextButton(onClick = onDismiss) { Text("Done") }
+                    TextButton(onClick = onDismiss) { Text(stringResource(R.string.common_done)) }
                 }
             } else {
                 ReportReview(
@@ -1036,15 +1044,15 @@ private fun ReportReview(
             Modifier.fillMaxWidth().height(Spacing.navBarHeight),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            PcIconButton(Icons.Filled.Close, "Cancel report", onClick = onDismiss)
+            PcIconButton(Icons.Filled.Close, stringResource(R.string.chat_cd_cancel_report), onClick = onDismiss)
             Text(
-                "Report AI response",
+                stringResource(R.string.chat_report_title),
                 style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
                 color = colors.onBackground,
                 modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
             )
             TextButton(onClick = onSubmit, enabled = category != null && !submitting) {
-                Text(if (submitting) "Sending…" else "Send")
+                Text(if (submitting) stringResource(R.string.common_sending) else stringResource(R.string.common_send))
             }
         }
         Column(
@@ -1053,23 +1061,23 @@ private fun ReportReview(
             verticalArrangement = Arrangement.spacedBy(18.dp),
         ) {
             Text(
-                "Choose what went wrong. PhoneCode sends only this category, your optional note, and basic app information.",
+                stringResource(R.string.chat_report_description),
                 style = MaterialTheme.typography.bodyMedium,
                 color = colors.secondary,
             )
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Reason", style = MaterialTheme.typography.titleSmall, color = colors.onBackground)
+                Text(stringResource(R.string.chat_report_reason), style = MaterialTheme.typography.titleSmall, color = colors.onBackground)
                 REPORT_CATEGORIES.forEach { option ->
                     ReportChoice(
-                        title = option.title,
-                        detail = option.detail,
+                        title = stringResource(option.title),
+                        detail = stringResource(option.detail),
                         selected = category == option.id,
                         onClick = { onCategory(option.id) },
                     )
                 }
             }
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("What happened? (optional)", style = MaterialTheme.typography.titleSmall, color = colors.onBackground)
+                Text(stringResource(R.string.chat_report_what_happened), style = MaterialTheme.typography.titleSmall, color = colors.onBackground)
                 BasicTextField(
                     value = note,
                     onValueChange = onNote,
@@ -1079,15 +1087,15 @@ private fun ReportReview(
                         .background(colors.surfaceContainerLow).padding(14.dp),
                     decorationBox = { field ->
                         Box {
-                            if (note.isEmpty()) Text("Describe the problem without pasting private information.", color = colors.tertiary)
+                            if (note.isEmpty()) Text(stringResource(R.string.chat_report_note_placeholder), color = colors.tertiary)
                             field()
                         }
                     },
                 )
-                Text("${note.length}/1000", style = MaterialTheme.typography.labelSmall, color = colors.tertiary)
+                Text(stringResource(R.string.chat_report_note_count, note.length), style = MaterialTheme.typography.labelSmall, color = colors.tertiary)
             }
             Text(
-                error ?: "The response, prompt, files, credentials, tool activity, chat history, and device identifiers are never attached.",
+                error ?: stringResource(R.string.chat_report_privacy_note),
                 style = MaterialTheme.typography.labelMedium,
                 color = if (error != null) colors.error else colors.tertiary,
             )
@@ -1324,9 +1332,9 @@ private fun ToolActivityView(line: ChatLine.ToolActivity) {
             }
             Text(
                 when (line.status) {
-                    ToolStatus.RUNNING -> "Running"
-                    ToolStatus.DONE -> "Done"
-                    ToolStatus.ERROR -> "Failed"
+                    ToolStatus.RUNNING -> stringResource(R.string.common_running)
+                    ToolStatus.DONE -> stringResource(R.string.common_done)
+                    ToolStatus.ERROR -> stringResource(R.string.common_failed)
                 },
                 style = MaterialTheme.typography.labelSmall,
                 color = if (error) colors.onErrorContainer else colors.tertiary,
@@ -1342,20 +1350,20 @@ private fun ToolActivityView(line: ChatLine.ToolActivity) {
                 Text(toolAction(line.name, line.status), style = MaterialTheme.typography.titleMedium, color = colors.onBackground)
                 Text(line.name, style = MaterialTheme.typography.labelSmall.copy(fontFamily = PcMono), color = colors.onSurfaceVariant)
             }
-            TextButton(onClick = close, modifier = Modifier.heightIn(min = Spacing.touchTarget)) { Text("Done") }
+            TextButton(onClick = close, modifier = Modifier.heightIn(min = Spacing.touchTarget)) { Text(stringResource(R.string.common_done)) }
         }
         Column(
             Modifier.fillMaxWidth().heightIn(max = 520.dp).contentVerticalScroll(rememberScrollState())
                 .padding(horizontal = 20.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Text("Input", style = MaterialTheme.typography.labelMedium, color = colors.onSurfaceVariant)
+            Text(stringResource(R.string.common_input), style = MaterialTheme.typography.labelMedium, color = colors.onSurfaceVariant)
             SelectionContainer {
-                Text(line.input.ifBlank { "(none)" }, style = MaterialTheme.typography.bodySmall.copy(fontFamily = PcMono), color = colors.onBackground)
+                Text(line.input.ifBlank { stringResource(R.string.chat_tool_none) }, style = MaterialTheme.typography.bodySmall.copy(fontFamily = PcMono), color = colors.onBackground)
             }
-            Text("Output", style = MaterialTheme.typography.labelMedium, color = colors.onSurfaceVariant, modifier = Modifier.padding(top = 8.dp))
+            Text(stringResource(R.string.common_output), style = MaterialTheme.typography.labelMedium, color = colors.onSurfaceVariant, modifier = Modifier.padding(top = 8.dp))
             SelectionContainer {
-                Text(line.detail.ifBlank { if (running) "Waiting for output…" else "(no output)" }, style = MaterialTheme.typography.bodySmall.copy(fontFamily = PcMono), color = colors.onBackground)
+                Text(line.detail.ifBlank { if (running) stringResource(R.string.chat_tool_waiting_output) else stringResource(R.string.chat_tool_no_output) }, style = MaterialTheme.typography.bodySmall.copy(fontFamily = PcMono), color = colors.onBackground)
             }
             TextButton(
                 onClick = { clipboard.setText(AnnotatedString("Input:\n${line.input}\n\nOutput:\n${line.detail}")) },
@@ -1363,28 +1371,29 @@ private fun ToolActivityView(line: ChatLine.ToolActivity) {
             ) {
                 Icon(Icons.Filled.ContentCopy, null, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(8.dp))
-                Text("Copy details")
+                Text(stringResource(R.string.chat_tool_copy_details))
             }
         }
     }
 }
 
+@Composable
 private fun toolAction(name: String, status: ToolStatus): String {
     val active = status == ToolStatus.RUNNING
     return when {
-        name == "read" -> if (active) "Reading file" else "Read file"
-        name == "write" -> if (active) "Writing file" else "Wrote file"
-        name == "edit" || name == "apply_patch" -> if (active) "Editing code" else "Edited code"
-        name == "ls" || name == "glob" -> if (active) "Browsing files" else "Browsed files"
-        name == "grep" -> if (active) "Searching code" else "Searched code"
-        name == "bash" -> if (active) "Running command" else "Ran command"
-        name == "websearch" -> if (active) "Searching the web" else "Searched the web"
-        name == "webfetch" -> if (active) "Opening webpage" else "Opened webpage"
-        name.startsWith("git_") -> if (active) "Running Git" else "Git · ${name.removePrefix("git_").replace('_', ' ')}"
-        name == "question" -> "Asked a question"
-        name == "task" -> if (active) "Delegating task" else "Completed delegated task"
-        name == "skill" -> if (active) "Loading skill" else "Loaded skill"
-        name.startsWith("todo") -> if (active) "Updating tasks" else "Updated tasks"
+        name == "read" -> if (active) stringResource(R.string.chat_tool_reading_file) else stringResource(R.string.chat_tool_read_file)
+        name == "write" -> if (active) stringResource(R.string.chat_tool_writing_file) else stringResource(R.string.chat_tool_wrote_file)
+        name == "edit" || name == "apply_patch" -> if (active) stringResource(R.string.chat_tool_editing_code) else stringResource(R.string.chat_tool_edited_code)
+        name == "ls" || name == "glob" -> if (active) stringResource(R.string.chat_tool_browsing_files) else stringResource(R.string.chat_tool_browsed_files)
+        name == "grep" -> if (active) stringResource(R.string.chat_tool_searching_code) else stringResource(R.string.chat_tool_searched_code)
+        name == "bash" -> if (active) stringResource(R.string.chat_tool_running_command) else stringResource(R.string.chat_tool_ran_command)
+        name == "websearch" -> if (active) stringResource(R.string.chat_tool_searching_web) else stringResource(R.string.chat_tool_searched_web)
+        name == "webfetch" -> if (active) stringResource(R.string.chat_tool_opening_webpage) else stringResource(R.string.chat_tool_opened_webpage)
+        name.startsWith("git_") -> if (active) stringResource(R.string.chat_tool_running_git) else stringResource(R.string.chat_tool_git_action, name.removePrefix("git_").replace('_', ' '))
+        name == "question" -> stringResource(R.string.chat_tool_asked_question)
+        name == "task" -> if (active) stringResource(R.string.chat_tool_delegating_task) else stringResource(R.string.chat_tool_completed_delegated_task)
+        name == "skill" -> if (active) stringResource(R.string.chat_tool_loading_skill) else stringResource(R.string.chat_tool_loaded_skill)
+        name.startsWith("todo") -> if (active) stringResource(R.string.chat_tool_updating_tasks) else stringResource(R.string.chat_tool_updated_tasks)
         else -> name.replace('_', ' ').replaceFirstChar { it.uppercase() }
     }
 }
@@ -1432,7 +1441,7 @@ private fun ErrorBanner(
                 Text(it, color = colors.onErrorContainer)
             }
         }
-        PcIconButton(Icons.Filled.Close, "Dismiss", tint = colors.onErrorContainer, onClick = onDismiss)
+        PcIconButton(Icons.Filled.Close, stringResource(R.string.common_dismiss), tint = colors.onErrorContainer, onClick = onDismiss)
     }
 }
 
@@ -1463,7 +1472,7 @@ internal fun TodoPanel(todos: List<TodoItem>) {
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Text("Tasks $done/${todos.size}", style = MaterialTheme.typography.labelSmall, color = colors.secondary)
+            Text(stringResource(R.string.chat_tasks_progress, done, todos.size), style = MaterialTheme.typography.labelSmall, color = colors.secondary)
             if (active != null) {
                 Text(glyphOf(active.status), style = MaterialTheme.typography.labelMedium.copy(fontFamily = PcMono), color = colorOf(active.status))
                 Text(
@@ -1538,7 +1547,7 @@ private fun Composer(
                             contentAlignment = Alignment.Center,
                         ) {
                             Box(Modifier.size(24.dp).clip(ShapePill).background(colors.inverseSurface), contentAlignment = Alignment.Center) {
-                                Icon(Icons.Filled.Close, "Remove photo", tint = colors.inverseOnSurface, modifier = Modifier.size(14.dp))
+                                Icon(Icons.Filled.Close, stringResource(R.string.chat_cd_remove_photo), tint = colors.inverseOnSurface, modifier = Modifier.size(14.dp))
                             }
                         }
                     }
@@ -1550,13 +1559,13 @@ private fun Composer(
                 ) {
                     PcIconButton(
                         Icons.Outlined.AttachFile,
-                        "Attach photo or file",
+                        stringResource(R.string.chat_cd_attach),
                         tint = if (state.sessionLoading) colors.tertiary else colors.secondary,
                         onClick = { if (!state.sessionLoading) onUpload() },
                     )
                     Box(Modifier.weight(1f).padding(horizontal = 4.dp)) {
                         if (input.isEmpty()) Text(
-                            if (state.sessionLoading) "Opening chat…" else "Message...",
+                            if (state.sessionLoading) stringResource(R.string.chat_opening_chat) else stringResource(R.string.chat_message_placeholder),
                             style = MaterialTheme.typography.bodySmall,
                             color = colors.secondary,
                         )
@@ -1573,7 +1582,7 @@ private fun Composer(
                                 KeyboardOptions.Default
                             },
                             keyboardActions = KeyboardActions(onSend = { if (input.isNotBlank() || photos.isNotEmpty()) onSend() }),
-                            modifier = Modifier.fillMaxWidth().semantics { contentDescription = "Message" },
+                            modifier = Modifier.fillMaxWidth().semantics { contentDescription = stringResource(R.string.chat_cd_message) },
                         )
                     }
                     val composerAction = when {
@@ -1596,8 +1605,8 @@ private fun Composer(
                         label = "composerAction",
                     ) { action ->
                         when (action) {
-                            true -> PcRoundButton(Icons.Filled.Stop, "Stop", filled = true, onClick = onStop)
-                            false -> PcRoundButton(Icons.Filled.ArrowUpward, "Send", filled = true, onClick = onSend)
+                            true -> PcRoundButton(Icons.Filled.Stop, stringResource(R.string.common_cd_stop), filled = true, onClick = onStop)
+                            false -> PcRoundButton(Icons.Filled.ArrowUpward, stringResource(R.string.common_cd_send), filled = true, onClick = onSend)
                             null -> Unit
                         }
                     }
@@ -1700,9 +1709,9 @@ private fun ModelSheet(
             Modifier.fillMaxWidth().padding(start = 24.dp, end = 12.dp, top = 2.dp, bottom = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text("Model & reasoning", style = MaterialTheme.typography.titleSmall, color = colors.onBackground, modifier = Modifier.weight(1f))
+            Text(stringResource(R.string.chat_model_and_reasoning), style = MaterialTheme.typography.titleSmall, color = colors.onBackground, modifier = Modifier.weight(1f))
             Text(
-                "Done",
+                stringResource(R.string.common_done),
                 style = MaterialTheme.typography.labelLarge,
                 color = colors.onBackground,
                 modifier = Modifier.clip(ShapePill).clickable(onClick = onDone).padding(horizontal = 14.dp, vertical = 9.dp),
@@ -1710,9 +1719,9 @@ private fun ModelSheet(
         }
         Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp)) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text("Agent mode", style = MaterialTheme.typography.labelMedium, color = colors.onSurfaceVariant, modifier = Modifier.weight(1f))
+                Text(stringResource(R.string.chat_agent_mode), style = MaterialTheme.typography.labelMedium, color = colors.onSurfaceVariant, modifier = Modifier.weight(1f))
                 Text(
-                    if (state.agentMode == AgentMode.PLAN) "Plan" else "Build",
+                    if (state.agentMode == AgentMode.PLAN) stringResource(R.string.chat_mode_plan) else stringResource(R.string.chat_mode_build),
                     style = MaterialTheme.typography.labelMedium,
                     color = colors.onBackground,
                 )
@@ -1738,9 +1747,9 @@ private fun ModelSheet(
                 }
             }
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text("Reasoning", style = MaterialTheme.typography.labelMedium, color = colors.onSurfaceVariant, modifier = Modifier.weight(1f))
+                Text(stringResource(R.string.chat_reasoning), style = MaterialTheme.typography.labelMedium, color = colors.onSurfaceVariant, modifier = Modifier.weight(1f))
                 Text(
-                    if (reasoningEfforts.isEmpty()) "Not available" else state.effort.display(),
+                    if (reasoningEfforts.isEmpty()) stringResource(R.string.chat_not_available) else state.effort.display(),
                     style = MaterialTheme.typography.labelMedium,
                     color = colors.tertiary,
                 )
@@ -1776,7 +1785,7 @@ private fun ModelSheet(
         ) {
             Icon(Icons.Outlined.Search, null, tint = colors.tertiary, modifier = Modifier.padding(start = 12.dp).size(17.dp))
             Box(Modifier.weight(1f).padding(horizontal = 8.dp)) {
-                if (query.isEmpty()) Text("Search models", style = MaterialTheme.typography.bodySmall, color = colors.tertiary)
+                if (query.isEmpty()) Text(stringResource(R.string.common_search_models), style = MaterialTheme.typography.bodySmall, color = colors.tertiary)
                 BasicTextField(
                     value = query, onValueChange = { query = it },
                     textStyle = MaterialTheme.typography.bodySmall.copy(color = colors.onBackground),
@@ -1801,7 +1810,7 @@ private fun ModelSheet(
             if (favourites.isNotEmpty()) {
                 item("favourites-header") {
                     Text(
-                        "Favourites",
+                        stringResource(R.string.chat_favourites),
                         style = MaterialTheme.typography.labelMedium,
                         color = colors.onSurfaceVariant,
                         modifier = Modifier.padding(start = 14.dp, top = 12.dp, bottom = 4.dp),
@@ -1824,7 +1833,7 @@ private fun ModelSheet(
                 val ready = vm.providerConfigured(pid)
                 item("provider:$pid") {
                     Text(
-                        (providerNames[pid] ?: pid) + if (ready) "" else " · Setup required",
+                        if (ready) providerNames[pid] ?: pid else stringResource(R.string.chat_provider_needs_setup, providerNames[pid] ?: pid),
                         style = MaterialTheme.typography.labelMedium,
                         color = if (ready) colors.onSurfaceVariant else colors.error,
                         modifier = Modifier.padding(start = 14.dp, top = 12.dp, bottom = 4.dp),
@@ -1848,10 +1857,11 @@ private fun ModelSheet(
 
 // DEFAULT reads as "Auto": thinking adapts to the selected model (catalog reasoning capability)
 // instead of one global effort silently applied to everything (round-3 feedback).
+@Composable
 private fun ReasoningEffort.display(): String =
     when (this) {
-        ReasoningEffort.DEFAULT -> "Auto"
-        ReasoningEffort.XHIGH -> "Extra high"
+        ReasoningEffort.DEFAULT -> stringResource(R.string.chat_reasoning_auto)
+        ReasoningEffort.XHIGH -> stringResource(R.string.chat_reasoning_extra_high)
         else -> name.lowercase().replaceFirstChar { it.uppercase() }
     }
 
@@ -1881,7 +1891,7 @@ private fun ModelRow(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-            if (!ready) Text("Provider setup required", style = MaterialTheme.typography.bodySmall, color = colors.error)
+            if (!ready) Text(stringResource(R.string.chat_provider_setup_required), style = MaterialTheme.typography.bodySmall, color = colors.error)
         }
         if (selected) Icon(Icons.Filled.Check, null, tint = colors.onBackground, modifier = Modifier.size(20.dp))
         Box(
@@ -1890,7 +1900,7 @@ private fun ModelRow(
         ) {
             Icon(
                 if (isFav) Icons.Filled.Star else Icons.Filled.StarBorder,
-                if (isFav) "Unfavourite" else "Favourite",
+                if (isFav) stringResource(R.string.common_unfavourite) else stringResource(R.string.common_favourite),
                 tint = if (isFav) colors.onBackground else colors.tertiary,
                 modifier = Modifier.size(18.dp),
             )
@@ -1927,13 +1937,13 @@ private fun ContextPopover(state: ChatUiState) {
             Column {
                 Text(if (limit != null) "${(frac * 100).toInt()}%" else fmt(used), style = MaterialTheme.typography.headlineSmall, color = colors.onBackground)
                 Text(
-                    if (limit != null) "${fmt(used)} / ${fmt(limit)} tokens" else "tokens this turn",
+                    if (limit != null) stringResource(R.string.chat_context_tokens_ratio, fmt(used), fmt(limit)) else stringResource(R.string.chat_tokens_this_turn),
                     style = MaterialTheme.typography.labelSmall, color = colors.tertiary,
                 )
             }
         }
-        UsageRow("Input", fmt(state.usageInput), colors.onBackground)
-        UsageRow("Output", fmt(state.usageOutput), colors.secondary)
+        UsageRow(stringResource(R.string.common_input), fmt(state.usageInput), colors.onBackground)
+        UsageRow(stringResource(R.string.common_output), fmt(state.usageOutput), colors.secondary)
     }
 }
 
@@ -1986,14 +1996,14 @@ private fun DialogAction(text: String, emphasized: Boolean, onClick: () -> Unit)
 private fun PermissionDialog(request: PermissionRequest, onApprove: () -> Unit, onDeny: () -> Unit) {
     val colors = MaterialTheme.colorScheme
     PcDialog(onDeny) {
-        Text("Allow ${request.tool}?", style = MaterialTheme.typography.titleMedium, color = colors.onBackground)
+        Text(stringResource(R.string.chat_allow_tool, request.tool), style = MaterialTheme.typography.titleMedium, color = colors.onBackground)
         Spacer(Modifier.height(8.dp))
         Text(request.summary, style = MaterialTheme.typography.labelMedium, color = colors.secondary)
         Spacer(Modifier.height(Spacing.s))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-            DialogAction("Deny", emphasized = false, onClick = onDeny)
+            DialogAction(stringResource(R.string.common_deny), emphasized = false, onClick = onDeny)
             Spacer(Modifier.width(8.dp))
-            DialogAction("Allow", emphasized = true, onClick = onApprove)
+            DialogAction(stringResource(R.string.common_allow), emphasized = true, onClick = onApprove)
         }
     }
 }
@@ -2024,14 +2034,14 @@ private fun QuestionDialog(request: QuestionRequest, onSubmit: (List<UserAnswer>
     PcDialog(onDismiss) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text(
-                if (question.header.isBlank()) "Question" else question.header,
+                if (question.header.isBlank()) stringResource(R.string.chat_question) else question.header,
                 style = MaterialTheme.typography.labelLarge,
                 color = colors.secondary,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
             )
-            Text("${page + 1} of ${request.questions.size}", style = MaterialTheme.typography.labelMedium, color = colors.tertiary)
+            Text(stringResource(R.string.chat_question_page, page + 1, request.questions.size), style = MaterialTheme.typography.labelMedium, color = colors.tertiary)
         }
         AnimatedContent(
             targetState = page,
@@ -2050,7 +2060,7 @@ private fun QuestionDialog(request: QuestionRequest, onSubmit: (List<UserAnswer>
             ) {
                 Text(item.question, style = MaterialTheme.typography.titleMedium, color = colors.onBackground)
                 Text(
-                    if (item.multiSelect) "Choose any that apply, or write your own." else "Choose one, or write your own.",
+                    if (item.multiSelect) stringResource(R.string.chat_question_multi_hint) else stringResource(R.string.chat_question_single_hint),
                     style = MaterialTheme.typography.bodySmall,
                     color = colors.secondary,
                     modifier = Modifier.padding(bottom = 2.dp),
@@ -2081,18 +2091,18 @@ private fun QuestionDialog(request: QuestionRequest, onSubmit: (List<UserAnswer>
                         if (selected) Icon(Icons.Filled.Check, null, tint = colors.primary, modifier = Modifier.size(18.dp))
                     }
                 }
-                dev.phonecode.app.ui.components.PcField(customAnswers[index].value, { customAnswers[index].value = it }, "Something else")
+                dev.phonecode.app.ui.components.PcField(customAnswers[index].value, { customAnswers[index].value = it }, stringResource(R.string.chat_question_custom))
             }
         }
         Row(Modifier.fillMaxWidth().padding(top = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-            DialogAction("Skip all", emphasized = false, onClick = onDismiss)
+            DialogAction(stringResource(R.string.common_skip_all), emphasized = false, onClick = onDismiss)
             Spacer(Modifier.weight(1f))
-            if (page > 0) DialogAction("Back", emphasized = false) { page-- }
+            if (page > 0) DialogAction(stringResource(R.string.common_back), emphasized = false) { page-- }
             Spacer(Modifier.width(4.dp))
             if (page < request.questions.lastIndex) {
-                DialogAction("Next", emphasized = true) { page++ }
+                DialogAction(stringResource(R.string.common_next), emphasized = true) { page++ }
             } else {
-                DialogAction("Submit", emphasized = true) {
+                DialogAction(stringResource(R.string.common_submit), emphasized = true) {
                 onSubmit(request.questions.mapIndexed { qi, question ->
                     val chosen = selections[qi].toMutableList()
                     val custom = customAnswers[qi].value.trim()
