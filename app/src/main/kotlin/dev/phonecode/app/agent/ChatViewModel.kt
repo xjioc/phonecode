@@ -743,7 +743,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             metadataMutationMutex.withLock {
                 runCatching { sharedFileAccess.link(uri) }
                     .onSuccess { folders -> _state.update { it.copy(sharedFolders = folders, notice = str(R.string.vm_notice_folder_linked)) } }
-                    .onFailure { error -> _state.update { it.copy(error = str(R.string.vm_error_link_folder, error.message)) } }
+                    .onFailure { error -> _state.update { it.copy(error = str(R.string.vm_error_link_folder, error.message ?: "")) } }
             }
         }
     }
@@ -796,7 +796,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                     it.copy(
                         projects = projectStore.list(),
                         sessions = sessionStore.list(),
-                        error = str(R.string.vm_error_remove_folder, error.message) +
+                        error = str(R.string.vm_error_remove_folder, error.message ?: "") +
                             if (rollbackFailed.isEmpty()) "" else str(R.string.vm_error_rollback_suffix),
                     )
                 }
