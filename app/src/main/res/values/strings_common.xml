@@ -1,0 +1,138 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Common strings shared across multiple screens. Prefix: common_ -->
+<resources>
+    <!-- App -->
+    <string name="common_app_name">PhoneCode</string>
+
+    <!-- Navigation / Actions -->
+    <string name="common_back">Back</string>
+    <string name="common_cancel">Cancel</string>
+    <string name="common_save">Save</string>
+    <string name="common_delete">Delete</string>
+    <string name="common_close">Close</string>
+    <string name="common_done">Done</string>
+    <string name="common_retry">Retry</string>
+    <string name="common_copy">Copy</string>
+    <string name="common_send">Send</string>
+    <string name="common_stop">Stop</string>
+    <string name="common_search">Search</string>
+    <string name="common_menu">Menu</string>
+    <string name="common_rename">Rename</string>
+    <string name="common_dismiss">Dismiss</string>
+    <string name="common_submit">Submit</string>
+    <string name="common_next">Next</string>
+    <string name="common_skip_all">Skip all</string>
+    <string name="common_allow">Allow</string>
+    <string name="common_deny">Deny</string>
+    <string name="common_discard">Discard</string>
+    <string name="common_keep_editing">Keep editing</string>
+    <string name="common_test">Test</string>
+    <string name="common_reload">Reload latest</string>
+
+    <!-- Status -->
+    <string name="common_enabled">Enabled</string>
+    <string name="common_off">Off</string>
+    <string name="common_running">Running</string>
+    <string name="common_ready">Ready</string>
+    <string name="common_unknown">Unknown</string>
+    <string name="common_failed">Failed</string>
+    <string name="common_loading">Loading…</string>
+    <string name="common_saving">Saving…</string>
+    <string name="common_testing">Testing…</string>
+    <string name="common_sending">Sending…</string>
+
+    <!-- Sections / Nav destinations -->
+    <string name="common_settings">Settings</string>
+    <string name="common_new_chat">New chat</string>
+    <string name="common_skills">Skills</string>
+    <string name="common_mcp">MCP</string>
+    <string name="common_general">General</string>
+    <string name="common_appearance">Appearance</string>
+    <string name="common_personalization">Personalization</string>
+    <string name="common_providers">Providers</string>
+    <string name="common_tools">Tools</string>
+    <string name="common_git">Git</string>
+    <string name="common_about">About</string>
+    <string name="common_workspace">Workspace</string>
+    <string name="common_data">Data</string>
+    <string name="common_models">Models</string>
+    <string name="common_account">Account</string>
+    <string name="common_details">Details</string>
+    <string name="common_advanced">Advanced</string>
+    <string name="common_instructions">Instructions</string>
+    <string name="common_connection">Connection</string>
+    <string name="common_version">Version</string>
+    <string name="common_name">Name</string>
+    <string name="common_none">None</string>
+    <string name="common_all">All</string>
+    <string name="common_all_on">All on</string>
+    <string name="common_all_off">All off</string>
+
+    <!-- Sidebar / Drawer -->
+    <string name="common_projects">Projects</string>
+    <string name="common_pinned">Pinned</string>
+    <string name="common_archived">Archived</string>
+    <string name="common_unsorted">Unsorted</string>
+    <string name="common_today">Today</string>
+    <string name="common_yesterday">Yesterday</string>
+    <string name="common_previous_7_days">Previous 7 days</string>
+    <string name="common_earlier">Earlier</string>
+    <string name="common_no_chats">No chats</string>
+    <string name="common_link_folder">Link a folder</string>
+    <string name="common_new_project">New project</string>
+    <string name="common_clear_search">Clear search</string>
+
+    <!-- Content descriptions -->
+    <string name="common_cd_back">Back</string>
+    <string name="common_cd_menu">Menu</string>
+    <string name="common_cd_search">Search chats and projects</string>
+    <string name="common_cd_close_search">Close search</string>
+    <string name="common_cd_settings">Settings</string>
+    <string name="common_cd_new_chat">New chat</string>
+    <string name="common_cd_new_project">New project</string>
+    <string name="common_cd_chat_options">Chat options</string>
+    <string name="common_cd_project_options">Project options</string>
+    <string name="common_cd_copy">Copy</string>
+    <string name="common_cd_send">Send</string>
+    <string name="common_cd_stop">Stop</string>
+
+    <!-- Dialogs -->
+    <string name="common_delete_chat_title">Delete chat?</string>
+    <string name="common_delete_project_title">Delete project?</string>
+    <string name="common_rename_chat_title">Rename chat</string>
+    <string name="common_rename_project_title">Rename project</string>
+    <string name="common_chat_title_label">Chat title</string>
+    <string name="common_project_name_label">Project name</string>
+    <string name="common_move_to">Move to</string>
+    <string name="common_move_to_ellipsis">Move to…</string>
+    <string name="common_pin">Pin</string>
+    <string name="common_unpin">Unpin</string>
+    <string name="common_archive">Archive</string>
+    <string name="common_unarchive">Unarchive</string>
+    <string name="common_favourite">Favourite</string>
+    <string name="common_unfavourite">Unfavourite</string>
+
+    <!-- Search -->
+    <string name="common_search_models">Search models</string>
+    <string name="common_search_servers">Search servers</string>
+    <string name="common_search_skills">Search skills</string>
+    <string name="common_search_tools">Search tools</string>
+    <string name="common_no_results">No results for \"%1$s\"</string>
+
+    <!-- Misc -->
+    <string name="common_phonecode">PhoneCode</string>
+    <string name="common_private">Private</string>
+    <string name="common_read_write">Read &amp; write</string>
+    <string name="common_read_only">Read only</string>
+    <string name="common_not_tested">Not tested</string>
+    <string name="common_connecting">Connecting</string>
+    <string name="common_connected">Connected</string>
+    <string name="common_input">Input</string>
+    <string name="common_output">Output</string>
+    <string name="common_global">Global</string>
+    <string name="common_project">Project</string>
+    <string name="common_active">Active</string>
+    <string name="common_needs_attention">Needs attention</string>
+    <string name="common_overridden">Overridden</string>
+    <string name="common_off_and_overridden">Off and overridden</string>
+</resources>
