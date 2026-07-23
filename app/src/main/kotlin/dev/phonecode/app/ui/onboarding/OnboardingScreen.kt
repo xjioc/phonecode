@@ -38,6 +38,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -123,14 +124,14 @@ private fun Welcome(onNext: () -> Unit) {
                     )
                 }
                 Text(
-                    "PhoneCode",
+                    stringResource(R.string.common_phonecode),
                     style = MaterialTheme.typography.headlineLarge.copy(fontWeight = FontWeight.SemiBold),
                     color = colors.onBackground,
                 )
             }
             Spacer(Modifier.height(28.dp))
             Text(
-                "Build real projects from your phone",
+                stringResource(R.string.onboarding_welcome_headline),
                 style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.SemiBold),
                 color = colors.onBackground,
                 textAlign = TextAlign.Center,
@@ -138,20 +139,20 @@ private fun Welcome(onNext: () -> Unit) {
             )
             Spacer(Modifier.height(10.dp))
             Text(
-                "Run an AI coding agent inside folders you choose, with the models and tools you trust.",
+                stringResource(R.string.onboarding_welcome_subtitle),
                 style = MaterialTheme.typography.bodyLarge,
                 color = colors.onSurfaceVariant,
                 textAlign = TextAlign.Center,
             )
             Spacer(Modifier.height(28.dp))
             PcGroup {
-                FeatureRow(Icons.Outlined.Folder, "Real project folders", "Keep chats and files together")
-                FeatureRow(Icons.Outlined.AccountTree, "A complete local workspace", "Run tools and manage source control")
-                FeatureRow(Icons.Outlined.Cloud, "Your choice of model", "Sign in or use your own provider keys")
+                FeatureRow(Icons.Outlined.Folder, stringResource(R.string.onboarding_feature_folders_title), stringResource(R.string.onboarding_feature_folders_sub))
+                FeatureRow(Icons.Outlined.AccountTree, stringResource(R.string.onboarding_feature_workspace_title), stringResource(R.string.onboarding_feature_workspace_sub))
+                FeatureRow(Icons.Outlined.Cloud, stringResource(R.string.onboarding_feature_model_title), stringResource(R.string.onboarding_feature_model_sub))
             }
         }
         PcButton(
-            text = "Get started",
+            text = stringResource(R.string.onboarding_get_started),
             modifier = Modifier.heightIn(min = 56.dp),
             onClick = onNext,
         )
@@ -177,15 +178,15 @@ private fun Connect(
             Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(horizontal = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            PcIconButton(Icons.AutoMirrored.Filled.ArrowBack, "Back", onClick = onBack)
+            PcIconButton(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.common_cd_back), onClick = onBack)
             Text(
-                "Setup",
+                stringResource(R.string.onboarding_setup_title),
                 style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
                 color = colors.onBackground,
                 modifier = Modifier.weight(1f).padding(start = 4.dp),
             )
             Text(
-                "2 of 2",
+                stringResource(R.string.onboarding_step_indicator, 2, 2),
                 style = MaterialTheme.typography.labelLarge,
                 color = colors.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 12.dp),
@@ -195,14 +196,14 @@ private fun Connect(
             Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp, vertical = 24.dp),
         ) {
             Text(
-                "Get ready to build",
+                stringResource(R.string.onboarding_connect_headline),
                 style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.SemiBold),
                 color = colors.onBackground,
                 modifier = Modifier.semantics { heading() },
             )
             Spacer(Modifier.height(8.dp))
             Text(
-                "Connect one model, then choose the workspace and services you want. You can return here after each step.",
+                stringResource(R.string.onboarding_connect_subtitle),
                 style = MaterialTheme.typography.bodyLarge,
                 color = colors.onSurfaceVariant,
             )
@@ -211,36 +212,36 @@ private fun Connect(
             PcGroup {
                 OptionRow(
                     icon = Icons.Outlined.Cloud,
-                    title = "Connect a model",
-                    sub = if (modelReady) "Ready" else "Required · sign in or add a provider key",
+                    title = stringResource(R.string.onboarding_connect_model_title),
+                    sub = if (modelReady) stringResource(R.string.common_ready) else stringResource(R.string.onboarding_connect_model_required),
                     complete = modelReady,
                     onClick = onConnectModels,
                 )
                 OptionRow(
                     icon = Icons.Outlined.Folder,
-                    title = "Choose a project folder",
-                    sub = if (projectReady) "Ready" else "Optional · use a folder from your phone",
+                    title = stringResource(R.string.onboarding_connect_folder_title),
+                    sub = if (projectReady) stringResource(R.string.common_ready) else stringResource(R.string.onboarding_connect_folder_optional),
                     complete = projectReady,
                     onClick = onCreateProject,
                 )
                 OptionRow(
                     icon = Icons.Outlined.AccountTree,
-                    title = "Connect GitHub",
-                    sub = if (githubReady) "Ready" else "Optional · pull and push repositories",
+                    title = stringResource(R.string.onboarding_connect_github_title),
+                    sub = if (githubReady) stringResource(R.string.common_ready) else stringResource(R.string.onboarding_connect_github_optional),
                     complete = githubReady,
                     onClick = onConnectGitHub,
                 )
             }
         }
         PcButton(
-            text = "Continue to PhoneCode",
+            text = stringResource(R.string.onboarding_continue),
             enabled = modelReady,
             modifier = Modifier.padding(horizontal = 20.dp).heightIn(min = 56.dp),
             onClick = onDone,
         )
         if (!modelReady) {
             Text(
-                "Connect a model to continue, or skip and do it later.",
+                stringResource(R.string.onboarding_connect_hint),
                 style = MaterialTheme.typography.bodySmall,
                 color = colors.onSurfaceVariant,
                 textAlign = TextAlign.Center,
@@ -251,7 +252,7 @@ private fun Connect(
             onClick = onSkip,
             modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).padding(horizontal = 20.dp),
         ) {
-            Text("Skip setup for now")
+            Text(stringResource(R.string.onboarding_skip))
         }
         Spacer(Modifier.height(16.dp))
     }

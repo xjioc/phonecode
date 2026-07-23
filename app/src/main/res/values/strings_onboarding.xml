@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Onboarding screen strings. Prefix: onboarding_ -->
+<resources>
+    <!-- Welcome page -->
+    <string name="onboarding_welcome_headline">Build real projects from your phone</string>
+    <string name="onboarding_welcome_subtitle">Run an AI coding agent inside folders you choose, with the models and tools you trust.</string>
+    <string name="onboarding_feature_folders_title">Real project folders</string>
+    <string name="onboarding_feature_folders_sub">Keep chats and files together</string>
+    <string name="onboarding_feature_workspace_title">A complete local workspace</string>
+    <string name="onboarding_feature_workspace_sub">Run tools and manage source control</string>
+    <string name="onboarding_feature_model_title">Your choice of model</string>
+    <string name="onboarding_feature_model_sub">Sign in or use your own provider keys</string>
+    <string name="onboarding_get_started">Get started</string>
+
+    <!-- Connect / Setup page -->
+    <string name="onboarding_setup_title">Setup</string>
+    <string name="onboarding_step_indicator">Step %1$d of %2$d</string>
+    <string name="onboarding_connect_headline">Get ready to build</string>
+    <string name="onboarding_connect_subtitle">Connect one model, then choose the workspace and services you want. You can return here after each step.</string>
+    <string name="onboarding_connect_model_title">Connect a model</string>
+    <string name="onboarding_connect_model_required">Required · sign in or add a provider key</string>
+    <string name="onboarding_connect_folder_title">Choose a project folder</string>
+    <string name="onboarding_connect_folder_optional">Optional · use a folder from your phone</string>
+    <string name="onboarding_connect_github_title">Connect GitHub</string>
+    <string name="onboarding_connect_github_optional">Optional · pull and push repositories</string>
+    <string name="onboarding_continue">Continue to PhoneCode</string>
+    <string name="onboarding_connect_hint">Connect a model to continue, or skip and do it later.</string>
+    <string name="onboarding_skip">Skip setup for now</string>
+</resources>
