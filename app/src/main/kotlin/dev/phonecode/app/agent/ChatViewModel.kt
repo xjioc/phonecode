@@ -82,15 +82,20 @@ import dev.phonecode.tools.todo.todoTools
 import dev.phonecode.tools.web.WebFetchTool
 import dev.phonecode.tools.web.WebSearchTool
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
@@ -1084,15 +1089,12 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                     return@launch
                 }
                 val ws = workspaceFor(projectId)
-                val total = countWorkspaceFiles(ws)
-                if (total == 0) {
+                val any = syncWorkspaceToFolder(ws, folder.id) { p ->
+                    _state.update { it.copy(syncProgress = SyncProgress(SyncDirection.TO_PHONE, p)) }
+                }
+                if (!any) {
                     _state.update { it.copy(syncProgress = null, notice = str(R.string.common_sync_complete)) }
                     return@launch
-                }
-                val done = AtomicLong(0)
-                syncWorkspaceToFolder(ws, folder.id, "") {
-                    val p = done.incrementAndGet().toFloat() / total
-                    _state.update { it.copy(syncProgress = SyncProgress(SyncDirection.TO_PHONE, p)) }
                 }
                 _state.update { it.copy(syncProgress = null, notice = str(R.string.common_sync_complete)) }
             } catch (e: Exception) {
@@ -1122,15 +1124,12 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                     return@launch
                 }
                 val ws = workspaceFor(projectId)
-                val total = countFolderFiles(folderId, "")
-                if (total == 0) {
+                val any = syncFolderToWorkspace(folderId, "", ws) { p ->
+                    _state.update { it.copy(syncProgress = SyncProgress(SyncDirection.FROM_PHONE, p)) }
+                }
+                if (!any) {
                     _state.update { it.copy(syncProgress = null, notice = str(R.string.common_sync_complete)) }
                     return@launch
-                }
-                val done = AtomicLong(0)
-                syncFolderToWorkspace(folderId, "", ws) {
-                    val p = done.incrementAndGet().toFloat() / total
-                    _state.update { it.copy(syncProgress = SyncProgress(SyncDirection.FROM_PHONE, p)) }
                 }
                 _state.update { it.copy(syncProgress = null, notice = str(R.string.common_sync_complete)) }
             } catch (e: Exception) {
@@ -1140,52 +1139,84 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    private fun countWorkspaceFiles(dir: File): Int {
-        return dir.listFiles()?.sumOf { file ->
-            if (file.isDirectory) countWorkspaceFiles(file)
-            else if (file.isFile) 1
-            else 0
-        } ?: 0
-    }
-
-    private suspend fun countFolderFiles(folderId: String, prefix: String): Int {
-        val entries = sharedFileAccess.list(folderId, prefix)
-        return entries.sumOf { entry ->
-            if (entry.directory) countFolderFiles(folderId, if (prefix.isEmpty()) entry.name else "$prefix/${entry.name}")
-            else 1
-        }
-    }
-
-    private suspend fun syncWorkspaceToFolder(ws: File, folderId: String, prefix: String, onProgress: () -> Unit) {
-        ws.listFiles()?.forEach { file ->
-            val rel = if (prefix.isEmpty()) file.name else "$prefix/${file.name}"
-            if (file.isDirectory) {
-                runCatching { sharedFileAccess.mkdir(folderId, rel) }
-                syncWorkspaceToFolder(file, folderId, rel, onProgress)
-            } else if (file.isFile) {
-                val content = file.readText()
-                runCatching { sharedFileAccess.write(folderId, rel, content) }
-                onProgress()
+    /** Gather all files (recursively), then copy them to the phone folder in parallel. */
+    private suspend fun syncWorkspaceToFolder(
+        ws: File, folderId: String, onProgress: (Float) -> Unit,
+    ): Boolean {
+        val files = mutableListOf<Pair<File, String>>()
+        val dirs = mutableListOf<String>()
+        val base = ws.absolutePath + "/"
+        ws.walkTopDown().forEach { f ->
+            if (f == ws) return@forEach
+            val rel = f.absolutePath.removePrefix(base)
+            if (f.isDirectory) {
+                dirs.add(rel)
+            } else if (f.isFile) {
+                files.add(f to rel)
             }
         }
+        if (files.isEmpty()) return false
+        // Create directories sequentially
+        for (dir in dirs) {
+            runCatching { sharedFileAccess.mkdir(folderId, dir) }
+        }
+        // Copy files in parallel
+        val total = files.size.toFloat()
+        val done = AtomicLong(0)
+        val semaphore = Semaphore(4)
+        coroutineScope {
+            files.map { (file, rel) ->
+                async {
+                    semaphore.withPermit {
+                        val content = file.readText()
+                        runCatching { sharedFileAccess.write(folderId, rel, content) }
+                        onProgress(done.incrementAndGet() / total)
+                    }
+                }
+            }.awaitAll()
+        }
+        return true
     }
 
-    private suspend fun syncFolderToWorkspace(folderId: String, prefix: String, ws: File, onProgress: () -> Unit) {
-        val entries = sharedFileAccess.list(folderId, prefix)
-        entries.forEach { entry ->
-            val rel = if (prefix.isEmpty()) entry.name else "$prefix/${entry.name}"
-            if (entry.directory) {
-                val dir = File(ws, rel)
-                dir.mkdirs()
-                syncFolderToWorkspace(folderId, rel, ws, onProgress)
-            } else {
-                val content = sharedFileAccess.read(folderId, rel, Int.MAX_VALUE)
-                val target = File(ws, rel)
-                target.parentFile?.mkdirs()
-                target.writeText(content)
-                onProgress()
+    /** Collect all files from the phone folder, then copy them to the workspace in parallel. */
+    private suspend fun syncFolderToWorkspace(
+        folderId: String, prefix: String, ws: File, onProgress: (Float) -> Unit,
+    ): Boolean {
+        data class CollectEntry(val rel: String, val directory: Boolean)
+        val entries = mutableListOf<CollectEntry>()
+        val collect: suspend (String) -> Unit = { p ->
+            val list = sharedFileAccess.list(folderId, p)
+            for (entry in list) {
+                val rel = if (p.isEmpty()) entry.name else "$p/${entry.name}"
+                entries.add(CollectEntry(rel, entry.directory))
+                if (entry.directory) collect(rel)
             }
         }
+        collect(prefix)
+        val files = entries.filter { !it.directory }
+        if (files.isEmpty()) return false
+        // Create directories first
+        for (entry in entries) {
+            if (entry.directory) File(ws, entry.rel).mkdirs()
+        }
+        // Read and write files in parallel
+        val total = files.size.toFloat()
+        val done = AtomicLong(0)
+        val semaphore = Semaphore(4)
+        coroutineScope {
+            files.map { file ->
+                async {
+                    semaphore.withPermit {
+                        val content = sharedFileAccess.read(folderId, file.rel, Int.MAX_VALUE)
+                        val target = File(ws, file.rel)
+                        target.parentFile?.mkdirs()
+                        target.writeText(content)
+                        onProgress(done.incrementAndGet() / total)
+                    }
+                }
+            }.awaitAll()
+        }
+        return true
     }
 
     fun renameSession(id: String, title: String) {
