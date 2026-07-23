@@ -43,7 +43,7 @@ jobs:
           cp app-debug.apk "$APK_NAME"
           sha256sum "$APK_NAME" > "$APK_NAME.sha256"
 
-      - name: Create draft release (if triggered by tag push)
+      - name: Create release (if triggered by tag push)
         if: startsWith(github.ref, 'refs/tags/')
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -54,8 +54,13 @@ jobs:
             --draft \
             --verify-tag \
             "app/build/outputs/apk/debug/$APK_NAME" \
-            "app/build/outputs/apk/debug/$APK_NAME.sha256" \
-            || echo "Release already exists, skipping creation"
+            "app/build/outputs/apk/debug/$APK_NAME.sha256" || {
+            echo "Release may already exist, uploading assets instead"
+            gh release upload "$GITHUB_REF_NAME" \
+              "app/build/outputs/apk/debug/$APK_NAME" \
+              "app/build/outputs/apk/debug/$APK_NAME.sha256" \
+              --clobber
+          }
 
       - name: Upload APK to existing release (if triggered by release publish)
         if: github.event_name == 'release'
