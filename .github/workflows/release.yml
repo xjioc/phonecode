@@ -37,9 +37,11 @@ jobs:
       - name: Build debug APK
         run: ./gradlew --no-daemon :app:assembleDebug
 
-      - name: Generate SHA-256 checksum
+      - name: Prepare release assets
         working-directory: app/build/outputs/apk/debug
-        run: sha256sum app-debug.apk > app-debug.apk.sha256
+        run: |
+          cp app-debug.apk "$APK_NAME"
+          sha256sum "$APK_NAME" > "$APK_NAME.sha256"
 
       - name: Create draft release (if triggered by tag push)
         if: startsWith(github.ref, 'refs/tags/')
@@ -51,8 +53,8 @@ jobs:
             --generate-notes \
             --draft \
             --verify-tag \
-            "app/build/outputs/apk/debug/app-debug.apk#${APK_NAME}" \
-            "app/build/outputs/apk/debug/app-debug.apk.sha256#${APK_NAME}.sha256" \
+            "app/build/outputs/apk/debug/$APK_NAME" \
+            "app/build/outputs/apk/debug/$APK_NAME.sha256" \
             || echo "Release already exists, skipping creation"
 
       - name: Upload APK to existing release (if triggered by release publish)
@@ -61,6 +63,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release upload "$GITHUB_REF_NAME" \
-            "app/build/outputs/apk/debug/app-debug.apk#${APK_NAME}" \
-            "app/build/outputs/apk/debug/app-debug.apk.sha256#${APK_NAME}.sha256" \
+            "app/build/outputs/apk/debug/$APK_NAME" \
+            "app/build/outputs/apk/debug/$APK_NAME.sha256" \
             --clobber
