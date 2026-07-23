@@ -53,7 +53,7 @@ jobs:
             --verify-tag \
             "app/build/outputs/apk/debug/app-debug.apk#${APK_NAME}" \
             "app/build/outputs/apk/debug/app-debug.apk.sha256#${APK_NAME}.sha256" \
-            --clobber || echo "Release already exists, skipping creation"
+            || echo "Release already exists, skipping creation"
 
       - name: Upload APK to existing release (if triggered by release publish)
         if: github.event_name == 'release'
