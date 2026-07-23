@@ -1,0 +1,66 @@
+name: Release
+
+on:
+  release:
+    types: [published]
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: android-actions/setup-android@v4
+        with:
+          packages: platform-tools platforms;android-37.0 build-tools;36.0.0
+      - uses: gradle/actions/setup-gradle@v6
+
+      - name: Extract version from build.gradle.kts
+        run: |
+          VERSION_NAME=$(grep 'versionName' app/build.gradle.kts | sed 's/.*"\(.*\)".*/\1/')
+          echo "VERSION_NAME=$VERSION_NAME" >> "$GITHUB_ENV"
+          echo "APK_NAME=phonecode-$VERSION_NAME.apk" >> "$GITHUB_ENV"
+
+      - name: Run tests and lint
+        run: ./gradlew --no-daemon test lintDebug :app:verifyLegalInventory :app:verifyPrototypeRuntimeBoundary
+
+      - name: Build debug APK
+        run: ./gradlew --no-daemon :app:assembleDebug
+
+      - name: Generate SHA-256 checksum
+        working-directory: app/build/outputs/apk/debug
+        run: sha256sum app-debug.apk > app-debug.apk.sha256
+
+      - name: Create draft release (if triggered by tag push)
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --title "$GITHUB_REF_NAME" \
+            --generate-notes \
+            --draft \
+            --verify-tag \
+            "app/build/outputs/apk/debug/app-debug.apk#${APK_NAME}" \
+            "app/build/outputs/apk/debug/app-debug.apk.sha256#${APK_NAME}.sha256" \
+            --clobber || echo "Release already exists, skipping creation"
+
+      - name: Upload APK to existing release (if triggered by release publish)
+        if: github.event_name == 'release'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "$GITHUB_REF_NAME" \
+            "app/build/outputs/apk/debug/app-debug.apk#${APK_NAME}" \
+            "app/build/outputs/apk/debug/app-debug.apk.sha256#${APK_NAME}.sha256" \
+            --clobber
