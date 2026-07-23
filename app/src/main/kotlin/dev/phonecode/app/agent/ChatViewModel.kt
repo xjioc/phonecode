@@ -974,7 +974,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                     newChat(project.id)
                 }
             }.onFailure { error ->
-                _state.update { it.copy(error = str(R.string.vm_error_create_project, error.message)) }
+                _state.update { it.copy(error = str(R.string.vm_error_create_project, error.message ?: "")) }
             }
             }
         }
@@ -1041,7 +1041,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                     it.copy(
                         projects = projectStore.list(),
                         sessions = sessionStore.list(),
-                        error = str(R.string.vm_error_remove_project, error.message) +
+                        error = str(R.string.vm_error_remove_project, error.message ?: "") +
                             if (rollbackFailed.isEmpty()) "" else str(R.string.vm_error_rollback_suffix),
                     )
                 }
@@ -1400,7 +1400,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                         }
                         .onFailure { e ->
                             codexAuth.stopLoopback()
-                            _state.update { it.copy(error = str(R.string.vm_error_codex_signin, e.message)) }
+                            _state.update { it.copy(error = str(R.string.vm_error_codex_signin, e.message ?: "")) }
                         }
                 }
             }
@@ -1411,7 +1411,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             url
         }.getOrElse { e ->
             codexAuth.stopLoopback()
-            _state.update { it.copy(error = str(R.string.vm_error_codex_signin, e.message)) }
+            _state.update { it.copy(error = str(R.string.vm_error_codex_signin, e.message ?: "")) }
             null
         }
     }
@@ -1452,7 +1452,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                         it.copy(
                             githubAuthCode = null,
                             githubVerifyUri = null,
-                            error = if (e is GitHubAuth.SignInAbandonedException) null else str(R.string.vm_error_github_signin, e.message),
+                            error = if (e is GitHubAuth.SignInAbandonedException) null else str(R.string.vm_error_github_signin, e.message ?: ""),
                         )
                     }
                 }
@@ -1482,7 +1482,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 } ?: error("could not open destination")
             }
                 .onSuccess { _state.update { it.copy(notice = str(R.string.vm_notice_backup_exported)) } }
-                .onFailure { e -> _state.update { it.copy(error = str(R.string.vm_error_export, e.message)) } }
+                .onFailure { e -> _state.update { it.copy(error = str(R.string.vm_error_export, e.message ?: "")) } }
         }
     }
 
@@ -1558,7 +1558,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 onFailure = { error ->
                     withContext(Dispatchers.Main.immediate) {
                         if (selection == sessionSelection) {
-                            _state.update { it.copy(sessionLoading = false, error = str(R.string.vm_error_import, error.message)) }
+                            _state.update { it.copy(sessionLoading = false, error = str(R.string.vm_error_import, error.message ?: "")) }
                         }
                     }
                 },
@@ -2337,5 +2337,7 @@ private const val BUNDLED_CATALOG = """
   "openrouter":{"id":"openrouter","name":"OpenRouter","models":{"anthropic/claude-opus-4-8":{"id":"anthropic/claude-opus-4-8","name":"Claude Opus 4.8"}}},
   "opencode":{"id":"opencode","name":"OpenCode Zen","models":{"nemotron-3-ultra-free":{"id":"nemotron-3-ultra-free","name":"Nemotron 3 Ultra Free"}}},
   "opencode-go":{"id":"opencode-go","name":"OpenCode Go","api":"https://opencode.ai/zen/go/v1","models":{"deepseek-v4-flash":{"id":"deepseek-v4-flash","name":"DeepSeek V4 Flash","reasoning":true,"reasoning_options":[{"type":"effort","values":["high","max"]}],"tool_call":true,"attachment":false,"limit":{"context":1000000,"output":384000}},"mimo-v2.5":{"id":"mimo-v2.5","name":"MiMo V2.5","reasoning":true,"tool_call":true,"attachment":true,"limit":{"context":1000000,"output":128000}}}}
+}
+"""
 }
 """

@@ -517,10 +517,11 @@ fun ChatScreen(
             // Context usage is a glanceable ring now (out of the tools menu); tap for the breakdown.
             val ctxUsed = state.usageInput + state.usageOutput
             val ctxFrac = state.contextLimit?.let { if (it > 0) ctxUsed.toFloat() / it else 0f } ?: 0f
+            val ctxDesc = stringResource(R.string.chat_cd_context_usage, (ctxFrac.coerceIn(0f, 1f) * 100).toInt())
             Box(
                 Modifier.size(48.dp).clip(ShapePill).background(colors.surfaceContainerHigh)
                     .clickable { modelOpen = false; contextOpen = true }
-                    .semantics { contentDescription = stringResource(R.string.chat_cd_context_usage, (ctxFrac.coerceIn(0f, 1f) * 100).toInt()) },
+                    .semantics { contentDescription = ctxDesc },
                 contentAlignment = Alignment.Center,
             ) {
                 ContextRing(fraction = ctxFrac, modifier = Modifier.size(22.dp), stroke = 2.5f, color = contextUsageColor(ctxFrac))
@@ -1564,6 +1565,7 @@ private fun Composer(
                         onClick = { if (!state.sessionLoading) onUpload() },
                     )
                     Box(Modifier.weight(1f).padding(horizontal = 4.dp)) {
+                        val composeDesc = stringResource(R.string.chat_cd_message)
                         if (input.isEmpty()) Text(
                             if (state.sessionLoading) stringResource(R.string.chat_opening_chat) else stringResource(R.string.chat_message_placeholder),
                             style = MaterialTheme.typography.bodySmall,
@@ -1582,7 +1584,7 @@ private fun Composer(
                                 KeyboardOptions.Default
                             },
                             keyboardActions = KeyboardActions(onSend = { if (input.isNotBlank() || photos.isNotEmpty()) onSend() }),
-                            modifier = Modifier.fillMaxWidth().semantics { contentDescription = stringResource(R.string.chat_cd_message) },
+                            modifier = Modifier.fillMaxWidth().semantics { contentDescription = composeDesc },
                         )
                     }
                     val composerAction = when {
