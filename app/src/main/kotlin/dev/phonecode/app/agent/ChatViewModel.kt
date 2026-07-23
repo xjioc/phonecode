@@ -121,6 +121,13 @@ data class RetryState(val attempt: Int, val message: String)
 data class AiReportSubmission(val accepted: Boolean, val reference: String? = null, val error: String? = null)
 data class AgentToolInfo(val name: String, val description: String, val source: String, val access: String)
 
+enum class SyncDirection { TO_PHONE, FROM_PHONE }
+
+data class SyncProgress(
+    val direction: SyncDirection,
+    val progress: Float, // 0.0 to 1.0
+)
+
 private data class BackupRestore(
     val count: Int,
     val settings: AppSettings,
@@ -156,7 +163,7 @@ data class ChatUiState(
     val streamingReasoning: String = "",
     val isRunning: Boolean = false,
     val sessionLoading: Boolean = false,
-    val syncProgress: String? = null,
+    val syncProgress: SyncProgress? = null,
     val queued: List<String> = emptyList(), // messages sent while a turn runs, awaiting pickup by the agent
     val models: List<ModelOption> = builtInModels(),
     val selected: ModelOption? = builtInModels().firstOrNull(),
@@ -1057,7 +1064,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     fun syncToPhone() {
         val projectId = currentProjectId ?: return
         if (_state.value.isRunning) return fail(str(R.string.vm_stop_agent_sync))
-        _state.update { it.copy(syncProgress = "sync") }
+        _state.update { it.copy(syncProgress = SyncProgress(SyncDirection.TO_PHONE, 0f)) }
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 val project = projectStore.list().firstOrNull { it.id == projectId }
@@ -1077,7 +1084,16 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                     return@launch
                 }
                 val ws = workspaceFor(projectId)
-                syncWorkspaceToFolder(ws, folder.id, "")
+                val total = countWorkspaceFiles(ws)
+                if (total == 0) {
+                    _state.update { it.copy(syncProgress = null, notice = str(R.string.common_sync_complete)) }
+                    return@launch
+                }
+                val done = AtomicLong(0)
+                syncWorkspaceToFolder(ws, folder.id, "") {
+                    val p = done.incrementAndGet().toFloat() / total
+                    _state.update { it.copy(syncProgress = SyncProgress(SyncDirection.TO_PHONE, p)) }
+                }
                 _state.update { it.copy(syncProgress = null, notice = str(R.string.common_sync_complete)) }
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
@@ -1090,7 +1106,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     fun syncFromPhone() {
         val projectId = currentProjectId ?: return
         if (_state.value.isRunning) return fail(str(R.string.vm_stop_agent_sync))
-        _state.update { it.copy(syncProgress = "sync") }
+        _state.update { it.copy(syncProgress = SyncProgress(SyncDirection.FROM_PHONE, 0f)) }
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 val project = projectStore.list().firstOrNull { it.id == projectId }
@@ -1106,7 +1122,16 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                     return@launch
                 }
                 val ws = workspaceFor(projectId)
-                syncFolderToWorkspace(folderId, "", ws)
+                val total = countFolderFiles(folderId, "")
+                if (total == 0) {
+                    _state.update { it.copy(syncProgress = null, notice = str(R.string.common_sync_complete)) }
+                    return@launch
+                }
+                val done = AtomicLong(0)
+                syncFolderToWorkspace(folderId, "", ws) {
+                    val p = done.incrementAndGet().toFloat() / total
+                    _state.update { it.copy(syncProgress = SyncProgress(SyncDirection.FROM_PHONE, p)) }
+                }
                 _state.update { it.copy(syncProgress = null, notice = str(R.string.common_sync_complete)) }
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
@@ -1115,32 +1140,50 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    private suspend fun syncWorkspaceToFolder(ws: File, folderId: String, prefix: String) {
+    private fun countWorkspaceFiles(dir: File): Int {
+        return dir.listFiles()?.sumOf { file ->
+            if (file.isDirectory) countWorkspaceFiles(file)
+            else if (file.isFile) 1
+            else 0
+        } ?: 0
+    }
+
+    private suspend fun countFolderFiles(folderId: String, prefix: String): Int {
+        val entries = sharedFileAccess.list(folderId, prefix)
+        return entries.sumOf { entry ->
+            if (entry.directory) countFolderFiles(folderId, if (prefix.isEmpty()) entry.name else "$prefix/${entry.name}")
+            else 1
+        }
+    }
+
+    private suspend fun syncWorkspaceToFolder(ws: File, folderId: String, prefix: String, onProgress: () -> Unit) {
         ws.listFiles()?.forEach { file ->
             val rel = if (prefix.isEmpty()) file.name else "$prefix/${file.name}"
             if (file.isDirectory) {
                 runCatching { sharedFileAccess.mkdir(folderId, rel) }
-                syncWorkspaceToFolder(file, folderId, rel)
+                syncWorkspaceToFolder(file, folderId, rel, onProgress)
             } else if (file.isFile) {
                 val content = file.readText()
                 runCatching { sharedFileAccess.write(folderId, rel, content) }
+                onProgress()
             }
         }
     }
 
-    private suspend fun syncFolderToWorkspace(folderId: String, prefix: String, ws: File) {
+    private suspend fun syncFolderToWorkspace(folderId: String, prefix: String, ws: File, onProgress: () -> Unit) {
         val entries = sharedFileAccess.list(folderId, prefix)
         entries.forEach { entry ->
             val rel = if (prefix.isEmpty()) entry.name else "$prefix/${entry.name}"
             if (entry.directory) {
                 val dir = File(ws, rel)
                 dir.mkdirs()
-                syncFolderToWorkspace(folderId, rel, ws)
+                syncFolderToWorkspace(folderId, rel, ws, onProgress)
             } else {
                 val content = sharedFileAccess.read(folderId, rel, Int.MAX_VALUE)
                 val target = File(ws, rel)
                 target.parentFile?.mkdirs()
                 target.writeText(content)
+                onProgress()
             }
         }
     }

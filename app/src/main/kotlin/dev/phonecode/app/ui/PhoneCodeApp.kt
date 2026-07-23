@@ -88,6 +88,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -117,6 +118,8 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import dev.phonecode.app.agent.ChatViewModel
+import dev.phonecode.app.agent.SyncDirection
+import dev.phonecode.app.agent.SyncProgress
 import dev.phonecode.app.R
 import dev.phonecode.app.PhoneCodeApplication
 import dev.phonecode.app.data.Project
@@ -762,7 +765,8 @@ private fun Sidebar(
                     Modifier.fillMaxWidth().padding(start = 10.dp, end = 10.dp, bottom = 8.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    val syncing = state.syncProgress != null
+                    val sp = state.syncProgress
+                    val syncing = sp != null
                     SidebarDestination(
                         icon = Icons.Outlined.Upload,
                         label = stringResource(R.string.common_sync_from_phone),
@@ -770,14 +774,16 @@ private fun Sidebar(
                         onClick = { vm.syncFromPhone() },
                         modifier = Modifier.weight(1f),
                         enabled = !syncing,
+                        progress = if (sp?.direction == SyncDirection.FROM_PHONE) sp.progress else null,
                     )
                     SidebarDestination(
                         icon = Icons.Outlined.Download,
                         label = stringResource(R.string.common_sync_to_phone),
-                        value = if (syncing) stringResource(R.string.common_syncing) else "",
+                        value = "",
                         onClick = { vm.syncToPhone() },
                         modifier = Modifier.weight(1f),
                         enabled = !syncing,
+                        progress = if (sp?.direction == SyncDirection.TO_PHONE) sp.progress else null,
                     )
                 }
             }
@@ -873,11 +879,23 @@ private fun SidebarDestination(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
+    progress: Float? = null,
 ) {
     val colors = MaterialTheme.colorScheme
     Row(
-        modifier.heightIn(min = 48.dp).clip(MaterialTheme.shapes.large)
+        modifier
+            .heightIn(min = 48.dp)
+            .clip(MaterialTheme.shapes.large)
+            .clipToBounds()
             .background(if (enabled) colors.surfaceContainerHigh.copy(alpha = 0.72f) else colors.surfaceContainerHigh.copy(alpha = 0.36f))
+            .drawBehind {
+                if (progress != null && progress > 0f) {
+                    drawRect(
+                        color = colors.primary.copy(alpha = 0.18f),
+                        size = androidx.compose.ui.geometry.Size(size.width * progress, size.height)
+                    )
+                }
+            }
             .then(if (enabled) Modifier.clickable(onClick = onClick) else Modifier)
             .padding(horizontal = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -885,7 +903,15 @@ private fun SidebarDestination(
     ) {
         Icon(icon, null, tint = if (enabled) colors.onSurfaceVariant else colors.onSurfaceVariant.copy(alpha = 0.38f), modifier = Modifier.size(20.dp))
         Text(label, style = MaterialTheme.typography.labelLarge, color = if (enabled) colors.onBackground else colors.onBackground.copy(alpha = 0.38f), modifier = Modifier.weight(1f))
-        if (value.isNotEmpty()) Text(value, style = MaterialTheme.typography.labelMedium, color = if (enabled) colors.tertiary else colors.tertiary.copy(alpha = 0.38f))
+        if (progress != null) {
+            Text(
+                "${(progress * 100).toInt()}%",
+                style = MaterialTheme.typography.labelMedium,
+                color = if (enabled) colors.tertiary else colors.tertiary.copy(alpha = 0.38f),
+            )
+        } else if (value.isNotEmpty()) {
+            Text(value, style = MaterialTheme.typography.labelMedium, color = if (enabled) colors.tertiary else colors.tertiary.copy(alpha = 0.38f))
+        }
     }
 }
 
