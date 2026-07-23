@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Sidebar / Drawer strings specific to PhoneCodeApp.kt. Prefix: sidebar_ -->
+<resources>
+    <!-- Content descriptions -->
+    <string name="sidebar_cd_new_chat_in_project">New chat in %1$s</string>
+
+    <!-- Menu actions -->
+    <string name="sidebar_delete_project">Delete project</string>
+
+    <!-- Delete confirmation details -->
+    <string name="sidebar_delete_chat_detail">%1$s will be removed from this device.</string>
+    <string name="sidebar_delete_project_detail">The project link will be removed and its chats moved to Unsorted. Workspace files stay under Recovered projects. The linked phone folder is not deleted.</string>
+</resources>

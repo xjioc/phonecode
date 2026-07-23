@@ -102,6 +102,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
 import androidx.core.view.WindowCompat
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -502,6 +503,13 @@ private fun Sidebar(
         }
     }
 
+    val timeBucketLabels = listOf(
+        stringResource(R.string.common_today),
+        stringResource(R.string.common_yesterday),
+        stringResource(R.string.common_previous_7_days),
+        stringResource(R.string.common_earlier),
+    )
+
     Box(
         Modifier.width(width).fillMaxSize().background(colors.background)
             .windowInsetsPadding(WindowInsets.systemBars).clipToBounds(),
@@ -522,7 +530,7 @@ private fun Sidebar(
                 userScrollEnabled = listCanScroll,
             ) {
             item {
-                Text("Projects", style = MaterialTheme.typography.labelMedium, color = colors.onSurfaceVariant, modifier = Modifier.padding(start = 12.dp, top = 14.dp, bottom = 6.dp))
+                Text(stringResource(R.string.common_projects), style = MaterialTheme.typography.labelMedium, color = colors.onSurfaceVariant, modifier = Modifier.padding(start = 12.dp, top = 14.dp, bottom = 6.dp))
             }
             if (query.isNotBlank() && matchingProjects.isEmpty() && filtered.isEmpty()) {
                 item(key = "search_empty") {
@@ -530,8 +538,8 @@ private fun Sidebar(
                         Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 28.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
                     ) {
-                        Text("No results for \"${query.take(40)}\"", style = MaterialTheme.typography.bodyMedium, color = colors.onSurfaceVariant)
-                        TextButton(onClick = ::closeSearch, modifier = Modifier.heightIn(min = Spacing.touchTarget)) { Text("Clear search") }
+                        Text(stringResource(R.string.common_no_results, query.take(40)), style = MaterialTheme.typography.bodyMedium, color = colors.onSurfaceVariant)
+                        TextButton(onClick = ::closeSearch, modifier = Modifier.heightIn(min = Spacing.touchTarget)) { Text(stringResource(R.string.common_clear_search)) }
                     }
                 }
             }
@@ -544,7 +552,7 @@ private fun Sidebar(
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
                         Icon(Icons.Outlined.Folder, null, tint = colors.secondary, modifier = Modifier.size(19.dp))
-                        Text("Link a folder", style = MaterialTheme.typography.bodyMedium, color = colors.onBackground)
+                        Text(stringResource(R.string.common_link_folder), style = MaterialTheme.typography.bodyMedium, color = colors.onBackground)
                     }
                 }
             }
@@ -571,11 +579,11 @@ private fun Sidebar(
                         Text("${byProject[project.id]?.size ?: 0}", style = MaterialTheme.typography.labelMedium, color = colors.tertiary)
                         PcIconButton(
                             icon = Icons.Filled.Add,
-                            contentDescription = "New chat in ${project.name}",
+                            contentDescription = stringResource(R.string.sidebar_cd_new_chat_in_project, project.name),
                             tint = colors.secondary,
                         ) { vm.newChat(project.id); onOpenChat() }
                         Box {
-                            PcIconButton(Icons.Filled.MoreVert, "Project options", tint = colors.secondary) { projectMenu = project }
+                            PcIconButton(Icons.Filled.MoreVert, stringResource(R.string.common_cd_project_options), tint = colors.secondary) { projectMenu = project }
                             MorphingMenu(
                                 expanded = projectMenu?.id == project.id,
                                 onDismiss = { projectMenu = null },
@@ -597,7 +605,7 @@ private fun Sidebar(
                 if (open) {
                     val chats = byProject[project.id].orEmpty()
                     if (chats.isEmpty()) item(key = "pe_${project.id}") {
-                        Text("No chats", style = MaterialTheme.typography.labelMedium, color = colors.tertiary, modifier = Modifier.padding(start = 40.dp, bottom = 8.dp, top = 2.dp))
+                        Text(stringResource(R.string.common_no_chats), style = MaterialTheme.typography.labelMedium, color = colors.tertiary, modifier = Modifier.padding(start = 40.dp, bottom = 8.dp, top = 2.dp))
                     }
                     chats.forEach { meta ->
                         item(key = "c_${meta.id}") {
@@ -607,16 +615,16 @@ private fun Sidebar(
                 }
             }
             if (pinned.isNotEmpty()) {
-                item(key = "h_pinned") { SectionHeader("Pinned") }
+                item(key = "h_pinned") { SectionHeader(stringResource(R.string.common_pinned)) }
                 pinned.forEach { meta ->
                     item(key = "pin_${meta.id}") {
                         SessionItem(meta, 12.dp)
                     }
                 }
             }
-            timeBuckets(loose).forEach { (label, chats) ->
-                item(key = "h_$label") {
-                    Text(label, style = MaterialTheme.typography.labelMedium, color = colors.onSurfaceVariant, modifier = Modifier.padding(start = 12.dp, top = 14.dp, bottom = 4.dp))
+            timeBuckets(loose).forEach { (bucketIdx, chats) ->
+                item(key = "h_bucket_$bucketIdx") {
+                    Text(timeBucketLabels[bucketIdx], style = MaterialTheme.typography.labelMedium, color = colors.onSurfaceVariant, modifier = Modifier.padding(start = 12.dp, top = 14.dp, bottom = 4.dp))
                 }
                 chats.forEach { meta ->
                     item(key = "u_${meta.id}") {
@@ -634,7 +642,7 @@ private fun Sidebar(
                     ) {
                         val rotation by animateFloatAsState(if (archivedOpen) 90f else 0f, PhoneSprings.standard, label = "arch")
                         Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = colors.tertiary, modifier = Modifier.size(16.dp).graphicsLayer { rotationZ = rotation })
-                        Text("Archived", style = MaterialTheme.typography.labelMedium, color = colors.onSurfaceVariant, modifier = Modifier.weight(1f))
+                        Text(stringResource(R.string.common_archived), style = MaterialTheme.typography.labelMedium, color = colors.onSurfaceVariant, modifier = Modifier.weight(1f))
                         Text("${archived.size}", style = MaterialTheme.typography.labelMedium, color = colors.tertiary)
                     }
                 }
@@ -662,7 +670,7 @@ private fun Sidebar(
                     .clickable(interactionSource = settingsInteraction, indication = ripple(), onClick = onOpenSettings),
                 contentAlignment = Alignment.Center,
             ) {
-                Icon(Icons.Outlined.Settings, "Settings", tint = colors.onBackground, modifier = Modifier.size(21.dp))
+                Icon(Icons.Outlined.Settings, stringResource(R.string.common_cd_settings), tint = colors.onBackground, modifier = Modifier.size(21.dp))
             }
             Spacer(Modifier.weight(1f))
             Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -673,7 +681,7 @@ private fun Sidebar(
                         .clickable(interactionSource = newProjectInteraction, indication = ripple(), onClick = onNewProject),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Icon(Icons.Outlined.CreateNewFolder, "New project", tint = colors.onBackground, modifier = Modifier.size(21.dp))
+                    Icon(Icons.Outlined.CreateNewFolder, stringResource(R.string.common_cd_new_project), tint = colors.onBackground, modifier = Modifier.size(21.dp))
                 }
                 val newChatInteraction = remember { MutableInteractionSource() }
                 Box(
@@ -682,7 +690,7 @@ private fun Sidebar(
                         .clickable(interactionSource = newChatInteraction, indication = ripple()) { vm.newChat(null); onOpenChat() },
                     contentAlignment = Alignment.Center,
                 ) {
-                    Icon(Icons.Outlined.Edit, "New chat", tint = colors.onPrimary, modifier = Modifier.size(25.dp))
+                    Icon(Icons.Outlined.Edit, stringResource(R.string.common_cd_new_chat), tint = colors.onPrimary, modifier = Modifier.size(25.dp))
                 }
             }
         }
@@ -718,7 +726,7 @@ private fun Sidebar(
                 ) {
                     Icon(
                         if (searchExpanded) Icons.Filled.Close else Icons.Outlined.Search,
-                        if (searchExpanded) "Close search" else "Search chats and projects",
+                        if (searchExpanded) stringResource(R.string.common_cd_close_search) else stringResource(R.string.common_cd_search),
                         tint = colors.onBackground,
                         modifier = Modifier.size(21.dp),
                     )
@@ -730,14 +738,14 @@ private fun Sidebar(
             ) {
                 SidebarDestination(
                     icon = Icons.Outlined.AutoAwesome,
-                    label = "Skills",
+                    label = stringResource(R.string.common_skills),
                     value = state.skills.count { it.status == SkillStatus.ACTIVE }.toString(),
                     onClick = onOpenSkills,
                     modifier = Modifier.weight(1f),
                 )
                 SidebarDestination(
                     icon = Icons.Outlined.Extension,
-                    label = "MCP",
+                    label = stringResource(R.string.common_mcp),
                     value = state.mcpServers.size.toString(),
                     onClick = onOpenMcp,
                     modifier = Modifier.weight(1f),
@@ -747,19 +755,19 @@ private fun Sidebar(
     }
 
     renameChat?.let { meta ->
-        TextPromptDialog("Rename chat", "Chat title", meta.title, { renameChat = null }) {
+        TextPromptDialog(stringResource(R.string.common_rename_chat_title), stringResource(R.string.common_chat_title_label), meta.title, { renameChat = null }) {
             vm.renameSession(meta.id, it); renameChat = null
         }
     }
     renameProject?.let { project ->
-        TextPromptDialog("Rename project", "Project name", project.name, { renameProject = null }) {
+        TextPromptDialog(stringResource(R.string.common_rename_project_title), stringResource(R.string.common_project_name_label), project.name, { renameProject = null }) {
             vm.renameProject(project.id, it); renameProject = null
         }
     }
     deleteChat?.let { meta ->
         ConfirmDeleteDialog(
-            title = "Delete chat?",
-            detail = "${meta.title} will be removed from this device.",
+            title = stringResource(R.string.common_delete_chat_title),
+            detail = stringResource(R.string.sidebar_delete_chat_detail, meta.title),
             onDismiss = { deleteChat = null },
         ) {
             vm.deleteSession(meta.id)
@@ -768,8 +776,8 @@ private fun Sidebar(
     }
     deleteProject?.let { project ->
         ConfirmDeleteDialog(
-            title = "Delete project?",
-            detail = "The project link will be removed and its chats moved to Unsorted. Workspace files stay under Recovered projects. The linked phone folder is not deleted.",
+            title = stringResource(R.string.common_delete_project_title),
+            detail = stringResource(R.string.sidebar_delete_project_detail),
             onDismiss = { deleteProject = null },
         ) {
             vm.deleteProject(project.id)
@@ -786,6 +794,7 @@ private fun SidebarTitleSearch(
     focusRequester: FocusRequester,
 ) {
     val colors = MaterialTheme.colorScheme
+    val searchCd = stringResource(R.string.common_cd_search)
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.CenterStart) {
         AnimatedVisibility(
             visible = !expanded,
@@ -793,7 +802,7 @@ private fun SidebarTitleSearch(
             exit = fadeOut(tween(100)),
         ) {
             Text(
-                "PhoneCode",
+                stringResource(R.string.common_phonecode),
                 style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
                 color = colors.onBackground,
             )
@@ -810,7 +819,7 @@ private fun SidebarTitleSearch(
             ) {
                 Icon(Icons.Outlined.Search, null, tint = colors.secondary, modifier = Modifier.size(18.dp))
                 Box(Modifier.weight(1f).padding(start = 8.dp)) {
-                    if (query.isEmpty()) Text("Search", style = MaterialTheme.typography.bodySmall, color = colors.secondary)
+                    if (query.isEmpty()) Text(stringResource(R.string.common_search), style = MaterialTheme.typography.bodySmall, color = colors.secondary)
                     BasicTextField(
                         value = query,
                         onValueChange = onQueryChange,
@@ -818,7 +827,7 @@ private fun SidebarTitleSearch(
                         cursorBrush = SolidColor(colors.primary),
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth().focusRequester(focusRequester)
-                            .semantics { contentDescription = "Search chats and projects" },
+                            .semantics { contentDescription = searchCd },
                     )
                 }
             }
@@ -848,20 +857,20 @@ private fun SidebarDestination(
     }
 }
 
-/** Recency buckets for the loose chat list: Today / Yesterday / Previous 7 days / Earlier. */
-private fun timeBuckets(sessions: List<SessionMeta>): List<Pair<String, List<SessionMeta>>> {
+/** Recency buckets for the loose chat list: Today / Yesterday / Previous 7 days / Earlier.
+ *  Returns bucket indices (0–3); resolve labels with stringResource in the Composable. */
+private fun timeBuckets(sessions: List<SessionMeta>): List<Pair<Int, List<SessionMeta>>> {
     val now = System.currentTimeMillis()
     val day = 86_400_000L
-    val labels = listOf("Today", "Yesterday", "Previous 7 days", "Earlier")
     fun idx(t: Long): Int = when {
         now - t < day -> 0
         now - t < 2 * day -> 1
         now - t < 7 * day -> 2
         else -> 3
     }
-    return labels.indices.mapNotNull { i ->
+    return (0..3).mapNotNull { i ->
         val chats = sessions.filter { idx(it.updatedAt) == i }
-        if (chats.isEmpty()) null else labels[i] to chats
+        if (chats.isEmpty()) null else i to chats
     }
 }
 
@@ -916,12 +925,12 @@ private fun ChatRow(
                 )
             }
         }
-        Text(if (running) "Running" else formatSessionDate(meta.updatedAt), style = MaterialTheme.typography.labelSmall, color = if (running) colors.primary else colors.tertiary, modifier = Modifier.padding(start = 8.dp))
+        Text(if (running) stringResource(R.string.common_running) else formatSessionDate(meta.updatedAt), style = MaterialTheme.typography.labelSmall, color = if (running) colors.primary else colors.tertiary, modifier = Modifier.padding(start = 8.dp))
         // Three-dot overflow: pin / move / archive / delete (also reachable via long-press).
         Box(
             contentAlignment = Alignment.Center,
         ) {
-            PcIconButton(Icons.Filled.MoreVert, "Chat options", tint = colors.secondary, onClick = onMenu)
+            PcIconButton(Icons.Filled.MoreVert, stringResource(R.string.common_cd_chat_options), tint = colors.secondary, onClick = onMenu)
             MorphingMenu(
                 expanded = menuExpanded,
                 onDismiss = onDismissMenu,
@@ -996,13 +1005,13 @@ private fun ChatOptionsMenu(
             if (mode == "move") {
                 PcIconButton(
                     Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                    "Back",
+                    stringResource(R.string.common_cd_back),
                     tint = MaterialTheme.colorScheme.secondary,
                     modifier = Modifier.graphicsLayer { rotationZ = 180f },
                 ) { mode = "menu" }
             }
             Text(
-                if (mode == "move") "Move to" else meta.title,
+                if (mode == "move") stringResource(R.string.common_move_to) else meta.title,
                 style = MaterialTheme.typography.labelLarge,
                 color = MaterialTheme.colorScheme.onBackground,
                 maxLines = 1,
@@ -1010,14 +1019,14 @@ private fun ChatOptionsMenu(
             )
         }
         if (mode == "move") {
-            MenuActionRow("Unsorted", Icons.Outlined.Inbox) { onMove(null); onDismiss() }
+            MenuActionRow(stringResource(R.string.common_unsorted), Icons.Outlined.Inbox) { onMove(null); onDismiss() }
             projects.forEach { p -> MenuActionRow(p.name, Icons.Outlined.Folder) { onMove(p.id); onDismiss() } }
         } else {
-            MenuActionRow(if (meta.pinned) "Unpin" else "Pin", Icons.Outlined.PushPin) { onPin(); onDismiss() }
-            MenuActionRow("Rename", Icons.Outlined.Edit) { onDismiss(); onRequestRename() }
-            MenuActionRow("Move to…", Icons.Outlined.Folder) { mode = "move" }
-            MenuActionRow(if (meta.archived) "Unarchive" else "Archive", Icons.Outlined.Archive) { onArchive(); onDismiss() }
-            MenuActionRow("Delete", Icons.Outlined.DeleteOutline, destructive = true) { onDelete(); onDismiss() }
+            MenuActionRow(if (meta.pinned) stringResource(R.string.common_unpin) else stringResource(R.string.common_pin), Icons.Outlined.PushPin) { onPin(); onDismiss() }
+            MenuActionRow(stringResource(R.string.common_rename), Icons.Outlined.Edit) { onDismiss(); onRequestRename() }
+            MenuActionRow(stringResource(R.string.common_move_to_ellipsis), Icons.Outlined.Folder) { mode = "move" }
+            MenuActionRow(if (meta.archived) stringResource(R.string.common_unarchive) else stringResource(R.string.common_archive), Icons.Outlined.Archive) { onArchive(); onDismiss() }
+            MenuActionRow(stringResource(R.string.common_delete), Icons.Outlined.DeleteOutline, destructive = true) { onDelete(); onDismiss() }
         }
     }
 }
@@ -1033,8 +1042,8 @@ private fun ProjectOptionsMenu(project: Project, onDismiss: () -> Unit, onReques
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.padding(horizontal = 10.dp, vertical = 12.dp),
         )
-        MenuActionRow("Rename", Icons.Outlined.Edit) { onDismiss(); onRequestRename() }
-        MenuActionRow("Delete project", Icons.Outlined.DeleteOutline, destructive = true) { onDelete(); onDismiss() }
+        MenuActionRow(stringResource(R.string.common_rename), Icons.Outlined.Edit) { onDismiss(); onRequestRename() }
+        MenuActionRow(stringResource(R.string.sidebar_delete_project), Icons.Outlined.DeleteOutline, destructive = true) { onDelete(); onDismiss() }
     }
 }
 
@@ -1049,8 +1058,8 @@ private fun ConfirmDeleteDialog(
         Text(detail, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Spacer(Modifier.height(Spacing.m))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Spacing.xs)) {
-            Box(Modifier.weight(1f)) { PcButton("Cancel", filled = false, onClick = onDismiss) }
-            Box(Modifier.weight(1f)) { PcButton("Delete", destructive = true, onClick = onConfirm) }
+            Box(Modifier.weight(1f)) { PcButton(stringResource(R.string.common_cancel), filled = false, onClick = onDismiss) }
+            Box(Modifier.weight(1f)) { PcButton(stringResource(R.string.common_delete), destructive = true, onClick = onConfirm) }
         }
     }
 }
@@ -1062,8 +1071,8 @@ private fun TextPromptDialog(title: String, placeholder: String, initial: String
         PcField(value, { value = it }, placeholder)
         Spacer(Modifier.height(Spacing.s))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Spacing.xs)) {
-            Box(Modifier.weight(1f)) { PcButton("Cancel", filled = false, onClick = onDismiss) }
-            Box(Modifier.weight(1f)) { PcButton("Save") { if (value.isNotBlank()) onConfirm(value.trim()) } }
+            Box(Modifier.weight(1f)) { PcButton(stringResource(R.string.common_cancel), filled = false, onClick = onDismiss) }
+            Box(Modifier.weight(1f)) { PcButton(stringResource(R.string.common_save)) { if (value.isNotBlank()) onConfirm(value.trim()) } }
         }
     }
 }
