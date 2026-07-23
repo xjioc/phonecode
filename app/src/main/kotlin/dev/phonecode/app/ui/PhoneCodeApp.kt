@@ -522,12 +522,15 @@ private fun Sidebar(
                 effect = listOverscroll,
             ).background(colors.background),
         ) {
+            val currentProject = state.projects.firstOrNull { it.id == state.currentProjectId }
+            val hasSyncButtons = currentProject?.folderId != null
+            val headerTopPadding = if (hasSyncButtons) 168.dp else 112.dp
             LazyColumn(
                 state = listState,
                 modifier = Modifier.fillMaxSize()
                     .then(if (blurChrome) Modifier.hazeSource(hazeState) else Modifier)
                     .padding(horizontal = 10.dp),
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(top = 112.dp, bottom = 132.dp),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(top = headerTopPadding, bottom = 132.dp),
                 overscrollEffect = listOverscroll.takeIf { listCanScroll },
                 userScrollEnabled = listCanScroll,
             ) {
@@ -754,8 +757,7 @@ private fun Sidebar(
                 )
             }
             // Sync buttons: only when the current project has a bound phone folder
-            val currentProject = state.projects.firstOrNull { it.id == state.currentProjectId }
-            if (currentProject?.folderId != null) {
+            if (hasSyncButtons) {
                 Row(
                     Modifier.fillMaxWidth().padding(start = 10.dp, end = 10.dp, bottom = 8.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
