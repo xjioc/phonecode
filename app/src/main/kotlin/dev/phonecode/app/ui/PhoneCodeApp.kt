@@ -516,15 +516,15 @@ private fun Sidebar(
         Modifier.width(width).fillMaxSize().background(colors.background)
             .windowInsetsPadding(WindowInsets.systemBars).clipToBounds(),
     ) {
+        val currentProject = state.projects.firstOrNull { it.id == state.currentProjectId }
+        val hasSyncButtons = currentProject?.folderId != null
+        val headerTopPadding = if (hasSyncButtons) 168.dp else 112.dp
         Box(
             Modifier.fillMaxSize().shortContentVerticalOverscroll(
                 enabled = !listCanScroll,
                 effect = listOverscroll,
             ).background(colors.background),
         ) {
-            val currentProject = state.projects.firstOrNull { it.id == state.currentProjectId }
-            val hasSyncButtons = currentProject?.folderId != null
-            val headerTopPadding = if (hasSyncButtons) 168.dp else 112.dp
             LazyColumn(
                 state = listState,
                 modifier = Modifier.fillMaxSize()
