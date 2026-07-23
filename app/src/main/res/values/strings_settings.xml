@@ -187,6 +187,14 @@
     <string name="settings_provider_exists">\"%1$s\" already exists</string>
     <string name="settings_add_model_id">Add at least one model id</string>
     <string name="settings_custom_provider_save_failed">Custom provider could not be saved</string>
+    <string name="settings_discover_models">Discover models</string>
+    <string name="settings_discovering_models">Discovering…</string>
+    <string name="settings_discover_models_failed">Model discovery failed: %1$s</string>
+    <string name="settings_discover_models_none">No models returned by the endpoint</string>
+    <string name="settings_discover_models_found">Found %1$d model(s)</string>
+    <string name="settings_discover_enter_url">Enter a base URL first</string>
+    <string name="settings_discover_models_title">Discovered models from %1$s</string>
+    <string name="settings_discover_no_key">Set an API key first</string>
 
     <!-- ToggleRow -->
     <string name="settings_on">on</string>

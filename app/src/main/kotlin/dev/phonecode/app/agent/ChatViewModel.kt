@@ -156,6 +156,7 @@ data class ChatUiState(
     val streamingReasoning: String = "",
     val isRunning: Boolean = false,
     val sessionLoading: Boolean = false,
+    val syncProgress: String? = null,
     val queued: List<String> = emptyList(), // messages sent while a turn runs, awaiting pickup by the agent
     val models: List<ModelOption> = builtInModels(),
     val selected: ModelOption? = builtInModels().firstOrNull(),
@@ -1048,6 +1049,98 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             } finally {
                 _state.update { state -> state.copy(sessionLoading = false) }
             }
+            }
+        }
+    }
+
+    /** Sync workspace → phone folder for the current project. */
+    fun syncToPhone() {
+        val projectId = currentProjectId ?: return
+        if (_state.value.isRunning) return fail(str(R.string.vm_stop_agent_sync))
+        _state.update { it.copy(syncProgress = "sync") }
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val project = projectStore.list().firstOrNull { it.id == projectId }
+                if (project == null) { _state.update { it.copy(syncProgress = null) }; return@launch }
+                val folderId = project.folderId
+                if (folderId == null) {
+                    _state.update { it.copy(syncProgress = null, error = str(R.string.sync_no_folder_bound)) }
+                    return@launch
+                }
+                val folder = sharedFolderStore.list().firstOrNull { it.id == folderId }
+                if (folder == null) {
+                    _state.update { it.copy(syncProgress = null, error = str(R.string.sync_no_folder_bound)) }
+                    return@launch
+                }
+                if (!folder.writable) {
+                    _state.update { it.copy(syncProgress = null, error = str(R.string.sync_folder_readonly)) }
+                    return@launch
+                }
+                val ws = workspaceFor(projectId)
+                syncWorkspaceToFolder(ws, folder.id, "")
+                _state.update { it.copy(syncProgress = null, notice = str(R.string.common_sync_complete)) }
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                _state.update { it.copy(syncProgress = null, error = str(R.string.common_sync_failed, e.message ?: "")) }
+            }
+        }
+    }
+
+    /** Sync phone folder → workspace for the current project. */
+    fun syncFromPhone() {
+        val projectId = currentProjectId ?: return
+        if (_state.value.isRunning) return fail(str(R.string.vm_stop_agent_sync))
+        _state.update { it.copy(syncProgress = "sync") }
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val project = projectStore.list().firstOrNull { it.id == projectId }
+                if (project == null) { _state.update { it.copy(syncProgress = null) }; return@launch }
+                val folderId = project.folderId
+                if (folderId == null) {
+                    _state.update { it.copy(syncProgress = null, error = str(R.string.sync_no_folder_bound)) }
+                    return@launch
+                }
+                val folder = sharedFolderStore.list().firstOrNull { it.id == folderId }
+                if (folder == null) {
+                    _state.update { it.copy(syncProgress = null, error = str(R.string.sync_no_folder_bound)) }
+                    return@launch
+                }
+                val ws = workspaceFor(projectId)
+                syncFolderToWorkspace(folderId, "", ws)
+                _state.update { it.copy(syncProgress = null, notice = str(R.string.common_sync_complete)) }
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                _state.update { it.copy(syncProgress = null, error = str(R.string.common_sync_failed, e.message ?: "")) }
+            }
+        }
+    }
+
+    private suspend fun syncWorkspaceToFolder(ws: File, folderId: String, prefix: String) {
+        ws.listFiles()?.forEach { file ->
+            val rel = if (prefix.isEmpty()) file.name else "$prefix/${file.name}"
+            if (file.isDirectory) {
+                runCatching { sharedFileAccess.mkdir(folderId, rel) }
+                syncWorkspaceToFolder(file, folderId, rel)
+            } else if (file.isFile) {
+                val content = file.readText()
+                runCatching { sharedFileAccess.write(folderId, rel, content) }
+            }
+        }
+    }
+
+    private suspend fun syncFolderToWorkspace(folderId: String, prefix: String, ws: File) {
+        val entries = sharedFileAccess.list(folderId, prefix)
+        entries.forEach { entry ->
+            val rel = if (prefix.isEmpty()) entry.name else "$prefix/${entry.name}"
+            if (entry.directory) {
+                val dir = File(ws, rel)
+                dir.mkdirs()
+                syncFolderToWorkspace(folderId, rel, ws)
+            } else {
+                val content = sharedFileAccess.read(folderId, rel, Int.MAX_VALUE)
+                val target = File(ws, rel)
+                target.parentFile?.mkdirs()
+                target.writeText(content)
             }
         }
     }

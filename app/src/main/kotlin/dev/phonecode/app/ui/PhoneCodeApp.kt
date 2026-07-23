@@ -58,6 +58,7 @@ import androidx.compose.material.icons.outlined.Archive
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.CreateNewFolder
 import androidx.compose.material.icons.outlined.DeleteOutline
+import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Extension
 import androidx.compose.material.icons.outlined.Folder
@@ -65,6 +66,7 @@ import androidx.compose.material.icons.outlined.Inbox
 import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.Upload
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -751,6 +753,32 @@ private fun Sidebar(
                     modifier = Modifier.weight(1f),
                 )
             }
+            // Sync buttons: only when the current project has a bound phone folder
+            val currentProject = state.projects.firstOrNull { it.id == state.currentProjectId }
+            if (currentProject?.folderId != null) {
+                Row(
+                    Modifier.fillMaxWidth().padding(start = 10.dp, end = 10.dp, bottom = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    val syncing = state.syncProgress != null
+                    SidebarDestination(
+                        icon = Icons.Outlined.Upload,
+                        label = stringResource(R.string.common_sync_from_phone),
+                        value = "",
+                        onClick = { vm.syncFromPhone() },
+                        modifier = Modifier.weight(1f),
+                        enabled = !syncing,
+                    )
+                    SidebarDestination(
+                        icon = Icons.Outlined.Download,
+                        label = stringResource(R.string.common_sync_to_phone),
+                        value = if (syncing) stringResource(R.string.common_syncing) else "",
+                        onClick = { vm.syncToPhone() },
+                        modifier = Modifier.weight(1f),
+                        enabled = !syncing,
+                    )
+                }
+            }
         }
     }
 
@@ -842,18 +870,20 @@ private fun SidebarDestination(
     value: String,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    enabled: Boolean = true,
 ) {
     val colors = MaterialTheme.colorScheme
     Row(
         modifier.heightIn(min = 48.dp).clip(MaterialTheme.shapes.large)
-            .background(colors.surfaceContainerHigh.copy(alpha = 0.72f)).clickable(onClick = onClick)
+            .background(if (enabled) colors.surfaceContainerHigh.copy(alpha = 0.72f) else colors.surfaceContainerHigh.copy(alpha = 0.36f))
+            .then(if (enabled) Modifier.clickable(onClick = onClick) else Modifier)
             .padding(horizontal = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Icon(icon, null, tint = colors.onSurfaceVariant, modifier = Modifier.size(20.dp))
-        Text(label, style = MaterialTheme.typography.labelLarge, color = colors.onBackground, modifier = Modifier.weight(1f))
-        Text(value, style = MaterialTheme.typography.labelMedium, color = colors.tertiary)
+        Icon(icon, null, tint = if (enabled) colors.onSurfaceVariant else colors.onSurfaceVariant.copy(alpha = 0.38f), modifier = Modifier.size(20.dp))
+        Text(label, style = MaterialTheme.typography.labelLarge, color = if (enabled) colors.onBackground else colors.onBackground.copy(alpha = 0.38f), modifier = Modifier.weight(1f))
+        if (value.isNotEmpty()) Text(value, style = MaterialTheme.typography.labelMedium, color = if (enabled) colors.tertiary else colors.tertiary.copy(alpha = 0.38f))
     }
 }
 

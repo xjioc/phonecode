@@ -135,4 +135,11 @@
     <string name="common_needs_attention">需要关注</string>
     <string name="common_overridden">已覆盖</string>
     <string name="common_off_and_overridden">已关闭且被覆盖</string>
+
+    <!-- 同步 -->
+    <string name="common_sync_to_phone">同步到手机</string>
+    <string name="common_sync_from_phone">从手机同步</string>
+    <string name="common_syncing">同步中…</string>
+    <string name="common_sync_complete">同步完成</string>
+    <string name="common_sync_failed">同步失败：%1$s</string>
 </resources>

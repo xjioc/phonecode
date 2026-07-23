@@ -7,6 +7,9 @@
     <string name="vm_stop_agent_open_chat">Stop the current agent before opening another chat.</string>
     <string name="vm_stop_agent_delete_chat">Stop the current agent before deleting this chat.</string>
     <string name="vm_stop_agent_delete_project">Stop the current agent before deleting this project.</string>
+    <string name="vm_stop_agent_sync">Stop the current agent before syncing.</string>
+    <string name="sync_no_folder_bound">This project is not bound to a phone folder.</string>
+    <string name="sync_folder_readonly">The bound phone folder is read-only.</string>
     <string name="vm_stop_agent_move_chat">Stop the current agent before moving this chat.</string>
     <string name="vm_stop_agent_archive_chat">Stop the current agent before archiving this chat.</string>
     <string name="vm_stop_agent_import">Stop the current agent before importing a backup.</string>

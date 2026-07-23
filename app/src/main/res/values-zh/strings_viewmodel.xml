@@ -7,6 +7,9 @@
     <string name="vm_stop_agent_open_chat">请先停止当前智能体，然后再打开其他聊天。</string>
     <string name="vm_stop_agent_delete_chat">请先停止当前智能体，然后再删除此聊天。</string>
     <string name="vm_stop_agent_delete_project">请先停止当前智能体，然后再删除此项目。</string>
+    <string name="vm_stop_agent_sync">请先停止当前智能体，然后再同步。</string>
+    <string name="sync_no_folder_bound">此项目未绑定手机文件夹。</string>
+    <string name="sync_folder_readonly">绑定的手机文件夹为只读。</string>
     <string name="vm_stop_agent_move_chat">请先停止当前智能体，然后再移动此聊天。</string>
     <string name="vm_stop_agent_archive_chat">请先停止当前智能体，然后再归档此聊天。</string>
     <string name="vm_stop_agent_import">请先停止当前智能体，然后再导入备份。</string>

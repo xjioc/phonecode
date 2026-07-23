@@ -89,8 +89,13 @@ import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.material3.ripple
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import org.json.JSONObject
 import dev.phonecode.app.agent.ChatViewModel
 import dev.phonecode.app.R
 import dev.phonecode.app.data.CustomModel
@@ -664,6 +669,8 @@ private fun ProvidersPage(vm: ChatViewModel, onOpenProvider: (String) -> Unit, o
 private fun ProviderDetailPage(vm: ChatViewModel, providerId: String, onBack: () -> Unit) {
     val state by vm.state.collectAsStateWithLifecycle()
     val colors = MaterialTheme.colorScheme
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val preset = vm.allProviders().firstOrNull { it.id == providerId }
     var key by remember(providerId) { mutableStateOf(vm.keyFor(providerId)) }
     var confirmRemove by remember(providerId) { mutableStateOf(false) }
@@ -712,6 +719,94 @@ private fun ProviderDetailPage(vm: ChatViewModel, providerId: String, onBack: ()
                             modifier = Modifier.weight(1f),
                         )
                         PcToggle(visible, { vm.toggleModelHidden(option) }, stringResource(R.string.settings_cd_model_visible, option.label))
+                    }
+                }
+            }
+        }
+        // "Discover models" button for built-in providers (non-custom, non-codex)
+        if (providerId != "codex" && !vm.isCustomProvider(providerId) && preset != null) {
+            Spacer(Modifier.height(6.dp))
+            var discoveringBuiltin by remember { mutableStateOf(false) }
+            var discoverDialog by remember { mutableStateOf<String?>(null) }
+            var discoverError by remember { mutableStateOf<String?>(null) }
+            PcButton(
+                if (discoveringBuiltin) stringResource(R.string.settings_discovering_models) else stringResource(R.string.settings_discover_models),
+                filled = false,
+                enabled = !discoveringBuiltin,
+            ) {
+                val apiKey = vm.keyFor(providerId)
+                if (apiKey.isBlank()) {
+                    discoverError = context.getString(R.string.settings_discover_no_key)
+                    return@PcButton
+                }
+                discoveringBuiltin = true
+                discoverError = null
+                scope.launch {
+                    try {
+                        val (body, code) = withContext(Dispatchers.IO) {
+                            val client = OkHttpClient()
+                            val reqBuilder = Request.Builder().url("${preset.baseUrl.trimEnd('/')}/models")
+                            when (preset.authScheme) {
+                                dev.phonecode.provider.preset.AuthScheme.X_API_KEY -> {
+                                    reqBuilder.addHeader("x-api-key", apiKey)
+                                    preset.extraHeaders.forEach { (k, v) -> reqBuilder.addHeader(k, v) }
+                                }
+                                else -> reqBuilder.addHeader("Authorization", "Bearer $apiKey")
+                            }
+                            val response = client.newCall(reqBuilder.build()).execute()
+                            Pair(response.body?.string(), response.code)
+                        }
+                        if (code !in 200..299 || body == null) {
+                            discoverError = context.getString(R.string.settings_discover_models_failed, "HTTP $code")
+                            discoveringBuiltin = false
+                            return@launch
+                        }
+                        val json = JSONObject(body)
+                        val data = json.optJSONArray("data")
+                        val discoveredIds = if (data != null) {
+                            (0 until data.length()).mapNotNull { i ->
+                                data.optJSONObject(i)?.optString("id")?.takeIf { it.isNotBlank() }
+                            }
+                        } else {
+                            emptyList()
+                        }
+                        if (discoveredIds.isEmpty()) {
+                            discoverError = context.getString(R.string.settings_discover_models_none)
+                        } else {
+                            discoverDialog = discoveredIds.joinToString("\n")
+                        }
+                    } catch (e: Exception) {
+                        discoverError = context.getString(R.string.settings_discover_models_failed, e.message ?: e.toString())
+                    } finally {
+                        discoveringBuiltin = false
+                    }
+                }
+            }
+            discoverError?.let {
+                Spacer(Modifier.height(4.dp))
+                Text(it, style = MaterialTheme.typography.labelSmall, color = colors.error, modifier = Modifier.padding(horizontal = Spacing.m))
+            }
+            // Dialog showing discovered models
+            discoverDialog?.let { idsJoined ->
+                Dialog(onDismissRequest = { discoverDialog = null }) {
+                    Column(
+                        Modifier.fillMaxWidth().shadow(24.dp, MaterialTheme.shapes.extraLarge, clip = false)
+                            .clip(MaterialTheme.shapes.extraLarge).background(colors.surfaceContainerHigh).padding(Spacing.m),
+                    ) {
+                        Text(
+                            stringResource(R.string.settings_discover_models_title, preset.displayName),
+                            style = MaterialTheme.typography.titleMedium, color = colors.onBackground,
+                            modifier = Modifier.padding(bottom = Spacing.s),
+                        )
+                        val lines = idsJoined.lines()
+                        PcField(
+                            idsJoined, {}, stringResource(R.string.settings_model_ids_placeholder),
+                            singleLine = false, minLines = (lines.size.coerceIn(3, 12)).coerceAtMost(lines.size),
+                        )
+                        Spacer(Modifier.height(Spacing.s))
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                            PcButton(stringResource(R.string.common_close)) { discoverDialog = null }
+                        }
                     }
                 }
             }
@@ -1677,6 +1772,63 @@ private fun CustomProviderDialog(
             PcField(name, { name = it }, stringResource(R.string.settings_provider_name_placeholder))
             Spacer(Modifier.height(6.dp))
             PcField(baseUrl, { baseUrl = it }, stringResource(R.string.settings_base_url_placeholder))
+            Spacer(Modifier.height(6.dp))
+            var discovering by remember { mutableStateOf(false) }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Spacing.xs)) {
+                Box(Modifier.weight(1f)) {
+                    PcButton(
+                        if (discovering) stringResource(R.string.settings_discovering_models) else stringResource(R.string.settings_discover_models),
+                        filled = false,
+                        enabled = !discovering,
+                    ) {
+                        val url = baseUrl.trim().trimEnd('/')
+                        if (url.isBlank()) {
+                            error = context.getString(R.string.settings_discover_enter_url)
+                            return@PcButton
+                        }
+                        discovering = true
+                        error = null
+                        scope.launch {
+                            try {
+                                val (body, code) = withContext(Dispatchers.IO) {
+                                    val client = OkHttpClient()
+                                    val request = Request.Builder().url("$url/models").build()
+                                    val response = client.newCall(request).execute()
+                                    Pair(response.body?.string(), response.code)
+                                }
+                                if (code !in 200..299 || body == null) {
+                                    error = context.getString(R.string.settings_discover_models_failed, "HTTP $code")
+                                    discovering = false
+                                    return@launch
+                                }
+                                val json = JSONObject(body)
+                                val data = json.optJSONArray("data")
+                                if (data == null || data.length() == 0) {
+                                    error = context.getString(R.string.settings_discover_models_none)
+                                    discovering = false
+                                    return@launch
+                                }
+                                val ids = mutableListOf<String>()
+                                for (i in 0 until data.length()) {
+                                    val obj = data.optJSONObject(i)
+                                    val id = obj?.optString("id")?.takeIf { it.isNotBlank() }
+                                    if (id != null) ids.add(id)
+                                }
+                                if (ids.isEmpty()) {
+                                    error = context.getString(R.string.settings_discover_models_none)
+                                } else {
+                                    modelsText = ids.joinToString("\n")
+                                    error = context.getString(R.string.settings_discover_models_found, ids.size)
+                                }
+                            } catch (e: Exception) {
+                                error = context.getString(R.string.settings_discover_models_failed, e.message ?: e.toString())
+                            } finally {
+                                discovering = false
+                            }
+                        }
+                    }
+                }
+            }
             Spacer(Modifier.height(6.dp))
             PcField(modelsText, { modelsText = it }, stringResource(R.string.settings_model_ids_placeholder), singleLine = false, minLines = 2)
             Spacer(Modifier.height(Spacing.xs))

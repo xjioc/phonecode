@@ -187,6 +187,14 @@
     <string name="settings_provider_exists">\"%1$s\" 已存在</string>
     <string name="settings_add_model_id">请至少添加一个模型 ID</string>
     <string name="settings_custom_provider_save_failed">无法保存自定义提供商</string>
+    <string name="settings_discover_models">发现模型</string>
+    <string name="settings_discovering_models">正在发现…</string>
+    <string name="settings_discover_models_failed">模型发现失败：%1$s</string>
+    <string name="settings_discover_models_none">接口未返回任何模型</string>
+    <string name="settings_discover_models_found">发现 %1$d 个模型</string>
+    <string name="settings_discover_enter_url">请先输入基础 URL</string>
+    <string name="settings_discover_models_title">从 %1$s 发现的模型</string>
+    <string name="settings_discover_no_key">请先设置 API Key</string>
 
     <!-- 开关行 -->
     <string name="settings_on">开</string>
