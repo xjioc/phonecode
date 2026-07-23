@@ -1,0 +1,190 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Settings screen strings. Prefix: settings_ -->
+<resources>
+    <!-- Page titles -->
+    <string name="settings_mcp_servers">MCP servers</string>
+    <string name="settings_agent_tools">Agent tools</string>
+    <string name="settings_files_permissions">Files &amp; permissions</string>
+    <string name="settings_export_import">Export &amp; import</string>
+    <string name="settings_terms_of_service">Terms of Service</string>
+    <string name="settings_privacy_policy">Privacy Policy</string>
+    <string name="settings_open_source_notices">Open-source notices</string>
+    <string name="settings_open_source_licenses">Open-source licenses</string>
+
+    <!-- HomePage -->
+    <string name="settings_folders_linked">%1$d linked</string>
+
+    <!-- AgentToolsPage -->
+    <string name="settings_agent_tools_note">%1$d available · read-only tools work in Plan mode · mutating actions follow your approval setting</string>
+
+    <!-- GeneralPage -->
+    <string name="settings_defaults">Defaults</string>
+    <string name="settings_default_mode">Default mode: %1$s</string>
+    <string name="settings_send_on_enter">Send on Enter</string>
+
+    <!-- FilesPage -->
+    <string name="settings_private_workspace">Private project workspace</string>
+    <string name="settings_private_workspace_desc">Permanent and fully available to the agent</string>
+    <string name="settings_phone_folders">Phone folders</string>
+    <string name="settings_cd_remove_folder">Remove %1$s</string>
+    <string name="settings_folder_picker_note">The system picker grants access only to the folder you choose. Linked access survives app restarts and can be removed here or in system settings.</string>
+    <string name="settings_agent_changes">Agent changes</string>
+    <string name="settings_ask_before_changes">Ask before changes</string>
+    <string name="settings_allow_changes_auto">Allow changes automatically</string>
+    <string name="settings_files_note">Reading the active workspace and linked folders is always allowed. This setting controls writes, terminal commands, Git operations, and other actions that can change data.</string>
+    <string name="settings_remove_folder_title">Remove folder access?</string>
+    <string name="settings_this_folder">this folder</string>
+    <string name="settings_remove_folder_msg_no_projects">PhoneCode will lose access to %1$s. The phone folder itself is not deleted.</string>
+    <string name="settings_remove_folder_msg_with_projects">PhoneCode will unlink %1$s, move %2$d project(s) and their chats to Unsorted, and keep private workspace files under Recovered projects. The phone folder itself is not deleted.</string>
+    <string name="settings_remove_access">Remove access</string>
+
+    <!-- AppearancePage -->
+    <string name="settings_theme">Theme</string>
+
+    <!-- PersonalPage -->
+    <string name="settings_custom_instructions">Custom instructions</string>
+    <string name="settings_custom_instructions_placeholder">Tell the agent how you like to work - style, tools, conventions…</string>
+
+    <!-- ProvidersPage -->
+    <string name="settings_chatgpt">ChatGPT</string>
+    <string name="settings_sign_in_chatgpt">Sign in with ChatGPT (Codex)</string>
+    <string name="settings_secure_storage_unavailable">Secure storage is unavailable on this device. PhoneCode will not save API keys or sign-in credentials.</string>
+    <string name="settings_providers_json_preserved">The existing providers.json was preserved. Fix it before changing custom providers here.</string>
+    <string name="settings_signed_in_chatgpt">Signed in with ChatGPT</string>
+    <string name="settings_key_set">Key set</string>
+    <string name="settings_no_key">No key</string>
+    <string name="settings_cd_provider_enabled">%1$s enabled</string>
+    <string name="settings_add_custom_provider">Add custom provider</string>
+
+    <!-- ProviderDetailPage -->
+    <string name="settings_api_key">API key</string>
+    <string name="settings_signed_in">Signed in</string>
+    <string name="settings_disconnect">Disconnect</string>
+    <string name="settings_models_count">Models · %1$d</string>
+    <string name="settings_no_models_loaded">No models loaded for this provider yet. Models refresh automatically when PhoneCode opens.</string>
+    <string name="settings_no_models_match">No models match \"%1$s\".</string>
+    <string name="settings_cd_model_visible">%1$s visible</string>
+    <string name="settings_custom_provider">Custom provider</string>
+    <string name="settings_tap_again_remove_provider">Tap again to remove provider</string>
+    <string name="settings_remove_provider">Remove this provider</string>
+
+    <!-- McpPage -->
+    <string name="settings_mcp_status">%1$d connected · %2$d enabled · %3$d tools</string>
+    <string name="settings_mcp_json_preserved">The existing opencode.json has been preserved. Fix it before changing MCP servers here.</string>
+    <string name="settings_servers">Servers</string>
+    <string name="settings_no_mcp_servers">No MCP servers configured. Add one over HTTPS, or use local HTTP for a server on this device.</string>
+    <string name="settings_mcp_connected_tools">Connected · %1$d tools</string>
+    <string name="settings_mcp_failed">Failed · %1$s</string>
+    <string name="settings_cd_server_enabled">%1$s enabled</string>
+    <string name="settings_add_server">Add server</string>
+    <string name="settings_reconnect_servers">Reconnect enabled servers</string>
+
+    <!-- McpServerPage -->
+    <string name="settings_add_mcp_server">Add MCP server</string>
+    <string name="settings_mcp_changed_elsewhere">This server changed elsewhere. Reload before saving.</string>
+    <string name="settings_testing_config">Testing this configuration…</string>
+    <string name="settings_connected_to">Connected to %1$s</string>
+    <string name="settings_server_name">Server name</string>
+    <string name="settings_remote_url">Remote URL</string>
+    <string name="settings_http_headers">HTTP headers</string>
+    <string name="settings_headers_note">One Name: Value header per line. Values are encrypted with Android Keystore.</string>
+    <string name="settings_connection_timeout">Connection timeout</string>
+    <string name="settings_cd_connection_timeout">Connection timeout in milliseconds</string>
+    <string name="settings_mcp_save_failed">MCP configuration could not be saved</string>
+    <string name="settings_server">Server</string>
+    <string name="settings_protocol">Protocol</string>
+    <string name="settings_capabilities">Capabilities</string>
+    <string name="settings_no_tools">This server exposes no tools.</string>
+    <string name="settings_more_tools">%1$d more tools</string>
+    <string name="settings_confirm_delete">Confirm delete</string>
+    <string name="settings_delete_server">Delete server</string>
+    <string name="settings_unsaved_changes_server">This server has unsaved changes.</string>
+    <string name="settings_discard_changes">Discard changes?</string>
+    <string name="settings_name_required">Name is required</string>
+    <string name="settings_use_https">Use HTTPS, or HTTP only for localhost</string>
+    <string name="settings_server_exists">A server named %1$s already exists</string>
+    <string name="settings_header_format">Each header must use Name: Value</string>
+    <string name="settings_timeout_range">Timeout must be between 1000 and 60000 ms</string>
+
+    <!-- SkillsPage -->
+    <string name="settings_new_skill">New skill</string>
+    <string name="settings_skills_status">%1$d active · %2$d discovered</string>
+    <string name="settings_skills_status_issues">%1$d active · %2$d discovered · %3$d need attention</string>
+    <string name="settings_no_matching_skills">No matching skills.</string>
+    <string name="settings_cd_skill_enabled">%1$s enabled</string>
+    <string name="settings_skills_note">Skill files reload automatically. The agent can create and edit global or project skills with your permission.</string>
+    <string name="settings_issues">Issues</string>
+    <string name="settings_all_skills">All skills</string>
+    <string name="settings_off_and_overridden">Off and overridden</string>
+    <string name="settings_current_project">Current project</string>
+    <string name="settings_unsaved_changes_skill">This skill has unsaved changes.</string>
+
+    <!-- SkillDetailPage -->
+    <string name="settings_skill_enabled_desc">Applies immediately to the current agent session</string>
+    <string name="settings_skill_shadowed_note">Another skill with this name takes precedence. Disable or edit the active copy to use this one.</string>
+    <string name="settings_skill_edit_note">The agent can edit this skill with permission. Changes reload into this session automatically.</string>
+    <string name="settings_compatibility">Compatibility</string>
+    <string name="settings_license">License</string>
+    <string name="settings_location">Location</string>
+    <string name="settings_edit_skill">Edit skill</string>
+    <string name="settings_delete_skill">Delete skill</string>
+
+    <!-- SkillEditorPage -->
+    <string name="settings_edit_skill_name">Edit %1$s</string>
+    <string name="settings_identity">Identity</string>
+    <string name="settings_skill_name">Skill name</string>
+    <string name="settings_skill_scope_reload">%1$s · changes reload into the current session</string>
+    <string name="settings_skill_removed">This skill was removed or renamed. Your draft is preserved here.</string>
+    <string name="settings_copy_draft">Copy draft</string>
+    <string name="settings_skill_changed_elsewhere">This skill changed elsewhere. Your draft is preserved; reopen the editor to load the latest file.</string>
+    <string name="settings_skill_md">SKILL.md</string>
+    <string name="settings_skill_instructions">Skill instructions</string>
+    <string name="settings_skill_save_failed">Skill could not be saved</string>
+    <string name="settings_skill_read_failed">Skill could not be read</string>
+
+    <!-- GitPage -->
+    <string name="settings_github">GitHub</string>
+    <string name="settings_github_enter_code">Enter this code on GitHub</string>
+    <string name="settings_github_open_device">Open github.com/login/device</string>
+    <string name="settings_github_waiting">Waiting for you to authorize on GitHub - this completes automatically.</string>
+    <string name="settings_github_connected">Connected - push &amp; pull enabled</string>
+    <string name="settings_sign_out">Sign out</string>
+    <string name="settings_sign_in_github">Sign in with GitHub</string>
+    <string name="settings_show_advanced">Show advanced</string>
+    <string name="settings_show_advanced_desc">Ignore unless you know git</string>
+    <string name="settings_auto_branch">Auto-branch each task</string>
+    <string name="settings_auto_branch_desc">Each new chat works on its own branch of the project</string>
+    <string name="settings_manual_token">Manual access token</string>
+    <string name="settings_pat_placeholder">Fine-grained PAT (optional)</string>
+
+    <!-- ExportPage -->
+    <string name="settings_your_data">Your data</string>
+    <string name="settings_export_note">Exports are not encrypted. Saved provider and sign-in credentials are excluded, but chats and tool activity may contain sensitive content.</string>
+    <string name="settings_export_chats">Export chats &amp; settings</string>
+    <string name="settings_import_file">Import from a file</string>
+
+    <!-- AboutPage -->
+    <string name="settings_version_format">version %1$s</string>
+    <string name="settings_website">Website</string>
+    <string name="settings_config_directory">Config directory</string>
+
+    <!-- DocPage -->
+    <string name="settings_document_unavailable">Document unavailable.</string>
+
+    <!-- CustomProviderDialog -->
+    <string name="settings_provider_name_placeholder">Name (e.g. My LM Studio)</string>
+    <string name="settings_base_url_placeholder">Base URL (e.g. https://host/v1)</string>
+    <string name="settings_model_ids_placeholder">Model ids, one per line</string>
+    <string name="settings_anthropic_format">Anthropic format</string>
+    <string name="settings_anthropic_format_desc">Off = OpenAI-compatible (most servers)</string>
+    <string name="settings_cd_anthropic_format">Use Anthropic Messages format</string>
+    <string name="settings_name_needs_letter">Name needs at least one letter or digit</string>
+    <string name="settings_provider_name_short">Use a shorter, unique provider name</string>
+    <string name="settings_provider_exists">\"%1$s\" already exists</string>
+    <string name="settings_add_model_id">Add at least one model id</string>
+    <string name="settings_custom_provider_save_failed">Custom provider could not be saved</string>
+
+    <!-- ToggleRow -->
+    <string name="settings_on">on</string>
+    <string name="settings_off_label">off</string>
+</resources>
