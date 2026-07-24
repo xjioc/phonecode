@@ -1145,9 +1145,17 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     private suspend fun syncWorkspaceToFolder(
         ws: File, folderId: String, parallelism: Int, onProgress: (Float) -> Unit,
     ): Boolean {
+        val base = ws.absolutePath + "/"
+        // Pass 1: 快速统计文件总数
+        val total = ws.walkTopDown()
+            .filter { it != ws && it.isFile }
+            .count()
+            .toFloat()
+        if (total == 0f) return false
+        onProgress(0f) // 告诉 UI 开始工作了
+        // Pass 2: 收集文件 + 目录 + 复制
         val files = mutableListOf<Pair<File, String>>()
         val dirs = mutableListOf<String>()
-        val base = ws.absolutePath + "/"
         ws.walkTopDown().forEach { f ->
             if (f == ws) return@forEach
             val rel = f.absolutePath.removePrefix(base)
@@ -1157,13 +1165,11 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 files.add(f to rel)
             }
         }
-        if (files.isEmpty()) return false
         // Create directories sequentially
         for (dir in dirs) {
             runCatching { sharedFileAccess.mkdir(folderId, dir) }
         }
-        // Copy files in parallel
-        val total = files.size.toFloat()
+        // Copy files in parallel with real progress
         val done = AtomicLong(0)
         val semaphore = Semaphore(parallelism)
         coroutineScope {
@@ -1184,6 +1190,20 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     private suspend fun syncFolderToWorkspace(
         folderId: String, prefix: String, ws: File, parallelism: Int, onProgress: (Float) -> Unit,
     ): Boolean {
+        // Pass 1: 快速统计文件总数
+        var total = 0
+        lateinit var countCollect: suspend (String) -> Unit
+        countCollect = { p ->
+            val list = sharedFileAccess.list(folderId, p)
+            for (entry in list) {
+                val rel = if (p.isEmpty()) entry.name else "$p/${entry.name}"
+                if (entry.directory) countCollect(rel) else total++
+            }
+        }
+        countCollect(prefix)
+        if (total == 0) return false
+        onProgress(0f) // 告诉 UI 开始工作了
+        // Pass 2: 收集条目 + 创建目录 + 复制文件
         data class CollectEntry(val rel: String, val directory: Boolean)
         val entries = mutableListOf<CollectEntry>()
         lateinit var collect: suspend (String) -> Unit
@@ -1197,13 +1217,12 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         }
         collect(prefix)
         val files = entries.filter { !it.directory }
-        if (files.isEmpty()) return false
         // Create directories first
         for (entry in entries) {
             if (entry.directory) File(ws, entry.rel).mkdirs()
         }
-        // Read and write files in parallel
-        val total = files.size.toFloat()
+        // Read and write files in parallel with real progress
+        val totalF = total.toFloat()
         val done = AtomicLong(0)
         val semaphore = Semaphore(parallelism)
         coroutineScope {
@@ -1214,7 +1233,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                         val target = File(ws, file.rel)
                         target.parentFile?.mkdirs()
                         target.writeText(content)
-                        onProgress(done.incrementAndGet() / total)
+                        onProgress(done.incrementAndGet() / totalF)
                     }
                 }
             }.awaitAll()

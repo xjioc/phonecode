@@ -12,7 +12,9 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -83,7 +85,12 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.vector.ImageVector
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -411,6 +418,43 @@ fun PhoneCodeApp() {
                     projectReady = chatState.projects.isNotEmpty(),
                     onDone = { settingsVm.update { it.copy(onboarded = true) } },
                 )
+            }
+
+            // ----- 全局同步完成提示（覆盖所有页面） -----
+            var syncDone by remember { mutableStateOf(false) }
+            LaunchedEffect(Unit) {
+                var wasSyncing = false
+                snapshotFlow { chatState.syncProgress }
+                    .collect { sp ->
+                        if (sp != null) wasSyncing = true
+                        if (wasSyncing && sp == null) {
+                            syncDone = true
+                            delay(3000)
+                            syncDone = false
+                            wasSyncing = false
+                        }
+                    }
+            }
+            AnimatedVisibility(
+                visible = syncDone,
+                enter = slideInVertically(tween(300, easing = PhoneEasings.iOSStandard)) + fadeIn(tween(200)),
+                exit = slideOutVertically(tween(200, easing = PhoneEasings.iOSStandard)) + fadeOut(tween(150)),
+                modifier = Modifier.align(Alignment.TopCenter),
+            ) {
+                Box(
+                    Modifier.padding(top = 48.dp).padding(horizontal = 16.dp).clip(MaterialTheme.shapes.small)
+                        .background(MaterialTheme.colorScheme.primaryContainer)
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("✓", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                        Text(
+                            stringResource(R.string.common_sync_complete),
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                        )
+                    }
+                }
             }
         }
     }
@@ -769,7 +813,11 @@ private fun Sidebar(
                     val syncing = sp != null
                     SidebarDestination(
                         icon = Icons.Outlined.Upload,
-                        label = stringResource(R.string.common_sync_from_phone),
+                        label = if (sp?.direction == SyncDirection.FROM_PHONE) {
+                            stringResource(R.string.common_syncing_progress, (sp.progress * 100).toInt())
+                        } else {
+                            stringResource(R.string.common_sync_from_phone)
+                        },
                         value = "",
                         onClick = { vm.syncFromPhone() },
                         modifier = Modifier.weight(1f),
@@ -778,7 +826,11 @@ private fun Sidebar(
                     )
                     SidebarDestination(
                         icon = Icons.Outlined.Download,
-                        label = stringResource(R.string.common_sync_to_phone),
+                        label = if (sp?.direction == SyncDirection.TO_PHONE) {
+                            stringResource(R.string.common_syncing_progress, (sp.progress * 100).toInt())
+                        } else {
+                            stringResource(R.string.common_sync_to_phone)
+                        },
                         value = "",
                         onClick = { vm.syncToPhone() },
                         modifier = Modifier.weight(1f),
@@ -902,14 +954,8 @@ private fun SidebarDestination(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Icon(icon, null, tint = if (enabled) colors.onSurfaceVariant else colors.onSurfaceVariant.copy(alpha = 0.38f), modifier = Modifier.size(20.dp))
-        Text(label, style = MaterialTheme.typography.labelLarge, color = if (enabled) colors.onBackground else colors.onBackground.copy(alpha = 0.38f), modifier = Modifier.weight(1f))
-        if (progress != null) {
-            Text(
-                "${(progress * 100).toInt()}%",
-                style = MaterialTheme.typography.labelMedium,
-                color = if (enabled) colors.tertiary else colors.tertiary.copy(alpha = 0.38f),
-            )
-        } else if (value.isNotEmpty()) {
+        Text(label, style = MaterialTheme.typography.labelLarge, color = if (enabled) colors.onBackground else colors.onBackground.copy(alpha = 0.38f), modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+        if (value.isNotEmpty()) {
             Text(value, style = MaterialTheme.typography.labelMedium, color = if (enabled) colors.tertiary else colors.tertiary.copy(alpha = 0.38f))
         }
     }
