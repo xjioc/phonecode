@@ -36,6 +36,9 @@
     <string name="settings_ask_before_changes">修改前询问</string>
     <string name="settings_allow_changes_auto">自动允许修改</string>
     <string name="settings_files_note">读取当前工作区和已关联文件夹始终允许。此设置控制写入、终端命令、Git 操作及其他可能更改数据的操作。</string>
+    <string name="settings_sync">同步</string>
+    <string name="settings_sync_parallelism">同步并行数</string>
+    <string name="settings_sync_parallelism_desc">同步时并发传输的文件数</string>
     <string name="settings_remove_folder_title">移除文件夹访问权限？</string>
     <string name="settings_this_folder">此文件夹</string>
     <string name="settings_remove_folder_msg_no_projects">PhoneCode 将失去对 %1$s 的访问权限。手机上的文件夹本身不会被删除。</string>

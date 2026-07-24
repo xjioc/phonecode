@@ -123,6 +123,7 @@ import dev.phonecode.app.ui.components.rememberPredictiveBackMotion
 import dev.phonecode.app.ui.theme.PcMono
 import dev.phonecode.app.ui.theme.PhoneEasings
 import dev.phonecode.app.ui.theme.PhoneSprings
+import dev.phonecode.app.ui.theme.ShapePill
 import dev.phonecode.app.ui.theme.Spacing
 import dev.phonecode.agent.AgentMode
 import dev.phonecode.tools.mcp.McpServerConfig
@@ -519,6 +520,34 @@ private fun FilesPage(vm: ChatViewModel, settingsVm: SettingsViewModel, onBack: 
             }
         }
         Note(stringResource(R.string.settings_files_note))
+        PcSectionLabel(stringResource(R.string.settings_sync))
+        PcGroup {
+            PcRow {
+                Column(Modifier.weight(1f)) {
+                    Text(stringResource(R.string.settings_sync_parallelism), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onBackground)
+                    Text(stringResource(R.string.settings_sync_parallelism_desc), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Box(
+                        Modifier.size(32.dp).clip(ShapePill).clickable(
+                            indication = ripple(),
+                            interactionSource = remember { MutableInteractionSource() },
+                            onClick = { if (settings.syncParallelism > 1) settingsVm.update { it.copy(syncParallelism = settings.syncParallelism - 1) } },
+                        ),
+                        contentAlignment = Alignment.Center,
+                    ) { Text("-", style = MaterialTheme.typography.titleMedium, color = if (settings.syncParallelism > 1) MaterialTheme.colorScheme.onBackground else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f)) }
+                    Text("${settings.syncParallelism}", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onBackground, modifier = Modifier.width(24.dp).padding(top = 2.dp).clipToBounds(), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                    Box(
+                        Modifier.size(32.dp).clip(ShapePill).clickable(
+                            indication = ripple(),
+                            interactionSource = remember { MutableInteractionSource() },
+                            onClick = { if (settings.syncParallelism < 10) settingsVm.update { it.copy(syncParallelism = settings.syncParallelism + 1) } },
+                        ),
+                        contentAlignment = Alignment.Center,
+                    ) { Text("+", style = MaterialTheme.typography.titleMedium, color = if (settings.syncParallelism < 10) MaterialTheme.colorScheme.onBackground else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f)) }
+                }
+            }
+        }
         state.notice?.let {
             Spacer(Modifier.height(10.dp))
             Note(it)

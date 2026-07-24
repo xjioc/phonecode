@@ -1089,7 +1089,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                     return@launch
                 }
                 val ws = workspaceFor(projectId)
-                val any = syncWorkspaceToFolder(ws, folder.id) { p ->
+                val parallelism = appSettings.load().syncParallelism.coerceIn(1, 10)
+                val any = syncWorkspaceToFolder(ws, folder.id, parallelism) { p ->
                     _state.update { it.copy(syncProgress = SyncProgress(SyncDirection.TO_PHONE, p)) }
                 }
                 if (!any) {
@@ -1124,7 +1125,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                     return@launch
                 }
                 val ws = workspaceFor(projectId)
-                val any = syncFolderToWorkspace(folderId, "", ws) { p ->
+                val parallelism = appSettings.load().syncParallelism.coerceIn(1, 10)
+                val any = syncFolderToWorkspace(folderId, "", ws, parallelism) { p ->
                     _state.update { it.copy(syncProgress = SyncProgress(SyncDirection.FROM_PHONE, p)) }
                 }
                 if (!any) {
@@ -1141,7 +1143,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Gather all files (recursively), then copy them to the phone folder in parallel. */
     private suspend fun syncWorkspaceToFolder(
-        ws: File, folderId: String, onProgress: (Float) -> Unit,
+        ws: File, folderId: String, parallelism: Int, onProgress: (Float) -> Unit,
     ): Boolean {
         val files = mutableListOf<Pair<File, String>>()
         val dirs = mutableListOf<String>()
@@ -1163,7 +1165,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         // Copy files in parallel
         val total = files.size.toFloat()
         val done = AtomicLong(0)
-        val semaphore = Semaphore(4)
+        val semaphore = Semaphore(parallelism)
         coroutineScope {
             files.map { (file, rel) ->
                 async {
@@ -1180,7 +1182,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Collect all files from the phone folder, then copy them to the workspace in parallel. */
     private suspend fun syncFolderToWorkspace(
-        folderId: String, prefix: String, ws: File, onProgress: (Float) -> Unit,
+        folderId: String, prefix: String, ws: File, parallelism: Int, onProgress: (Float) -> Unit,
     ): Boolean {
         data class CollectEntry(val rel: String, val directory: Boolean)
         val entries = mutableListOf<CollectEntry>()
@@ -1202,7 +1204,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         // Read and write files in parallel
         val total = files.size.toFloat()
         val done = AtomicLong(0)
-        val semaphore = Semaphore(4)
+        val semaphore = Semaphore(parallelism)
         coroutineScope {
             files.map { file ->
                 async {

@@ -19,6 +19,8 @@ data class AppSettings(
     val activeSessionId: String? = null,
     /** In-app language override: "SYSTEM" follows device locale, "en" / "zh" force a locale. */
     val language: String = "SYSTEM",
+    /** Number of concurrent file operations during sync (1-10). */
+    val syncParallelism: Int = 5,
 ) {
     val mode: ThemeMode get() = runCatching { ThemeMode.valueOf(themeMode) }.getOrDefault(ThemeMode.SYSTEM)
 }

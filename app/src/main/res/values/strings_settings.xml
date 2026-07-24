@@ -36,6 +36,9 @@
     <string name="settings_ask_before_changes">Ask before changes</string>
     <string name="settings_allow_changes_auto">Allow changes automatically</string>
     <string name="settings_files_note">Reading the active workspace and linked folders is always allowed. This setting controls writes, terminal commands, Git operations, and other actions that can change data.</string>
+    <string name="settings_sync">Sync</string>
+    <string name="settings_sync_parallelism">Sync parallelism</string>
+    <string name="settings_sync_parallelism_desc">Concurrent file operations during sync</string>
     <string name="settings_remove_folder_title">Remove folder access?</string>
     <string name="settings_this_folder">this folder</string>
     <string name="settings_remove_folder_msg_no_projects">PhoneCode will lose access to %1$s. The phone folder itself is not deleted.</string>
