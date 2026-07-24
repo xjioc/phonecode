@@ -1186,7 +1186,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     ): Boolean {
         data class CollectEntry(val rel: String, val directory: Boolean)
         val entries = mutableListOf<CollectEntry>()
-        val collect: suspend (String) -> Unit = { p ->
+        lateinit var collect: suspend (String) -> Unit
+        collect = { p ->
             val list = sharedFileAccess.list(folderId, p)
             for (entry in list) {
                 val rel = if (p.isEmpty()) entry.name else "$p/${entry.name}"
