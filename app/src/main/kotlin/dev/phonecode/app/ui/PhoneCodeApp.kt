@@ -76,7 +76,7 @@ import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
+import dev.phonecode.app.i18n.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.derivedStateOf
@@ -219,6 +219,11 @@ fun PhoneCodeApp() {
     // First-run overlay up: hide everything behind it from accessibility so TalkBack can't reach
     // the chat/settings controls under the modal.
     val needsOnboarding = settingsLoaded && !settings.onboarded
+
+    // Sync persisted language preference into the i18n layer.
+    androidx.compose.runtime.LaunchedEffect(settings.language) {
+        dev.phonecode.app.i18n.I18n.overrideLanguage = settings.language
+    }
 
     val dark = when (settings.mode) {
         ThemeMode.LIGHT -> false

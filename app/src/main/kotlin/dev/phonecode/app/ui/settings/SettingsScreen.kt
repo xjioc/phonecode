@@ -66,7 +66,7 @@ import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material3.Icon
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
+import dev.phonecode.app.i18n.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -775,6 +775,31 @@ private fun AgentToolAccessFilter.emptyLabel() = when (this) {
 private fun GeneralPage(settingsVm: SettingsViewModel, onBack: () -> Unit) {
     val settings by settingsVm.settings.collectAsStateWithLifecycle()
     Page("General", onBack) {
+        PcSectionLabel("Language")
+        PcGroup(Modifier.selectableGroup()) {
+            CheckRow(
+                "System default",
+                selected = settings.language == "SYSTEM",
+                sub = "Follow your phone's language",
+            ) {
+                settingsVm.update { it.copy(language = "SYSTEM") }
+                dev.phonecode.app.i18n.I18n.overrideLanguage = "SYSTEM"
+            }
+            CheckRow(
+                "English",
+                selected = settings.language == "en",
+            ) {
+                settingsVm.update { it.copy(language = "en") }
+                dev.phonecode.app.i18n.I18n.overrideLanguage = "en"
+            }
+            CheckRow(
+                "中文",
+                selected = settings.language == "zh",
+            ) {
+                settingsVm.update { it.copy(language = "zh") }
+                dev.phonecode.app.i18n.I18n.overrideLanguage = "zh"
+            }
+        }
         PcSectionLabel("Default agent mode")
         PcGroup(Modifier.selectableGroup()) {
             AgentMode.entries.forEach { mode ->

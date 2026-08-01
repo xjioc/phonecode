@@ -15,6 +15,7 @@ import android.os.PowerManager
 import dev.phonecode.app.MainActivity
 import dev.phonecode.app.PhoneCodeApplication
 import dev.phonecode.app.R
+import dev.phonecode.app.i18n.I18n
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.launch
 
@@ -28,10 +29,10 @@ class TurnService : Service() {
         super.onCreate()
         val channel = NotificationChannel(
             CHANNEL_ID,
-            "Agent activity",
+            I18n.tr("Agent activity"),
             NotificationManager.IMPORTANCE_LOW,
         ).apply {
-            description = "Shown while PhoneCode is working in the background."
+            description = I18n.tr("Shown while PhoneCode is working in the background.")
         }
         getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
     }
@@ -56,12 +57,12 @@ class TurnService : Service() {
         )
         val notification = Notification.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_launcher_foreground)
-            .setContentTitle("PhoneCode is working")
-            .setContentText("Agent work and local processes remain active.")
+            .setContentTitle(I18n.tr("PhoneCode is working"))
+            .setContentText(I18n.tr("Agent work and local processes remain active."))
             .setContentIntent(open)
             .setCategory(Notification.CATEGORY_SERVICE)
             .setOngoing(true)
-            .addAction(Notification.Action.Builder(null, "Stop", stop).build())
+            .addAction(Notification.Action.Builder(null, I18n.tr("Stop"), stop).build())
             .build()
         if (Build.VERSION.SDK_INT >= 34) {
             startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)

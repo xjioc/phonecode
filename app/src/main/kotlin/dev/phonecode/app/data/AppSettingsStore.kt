@@ -17,6 +17,8 @@ data class AppSettings(
     /** First-run onboarding shown and dismissed (round-4). */
     val onboarded: Boolean = false,
     val activeSessionId: String? = null,
+    /** UI language override: "SYSTEM" follows device locale, otherwise a BCP-47 tag like "zh" or "en". */
+    val language: String = "SYSTEM",
 ) {
     val mode: ThemeMode get() = runCatching { ThemeMode.valueOf(themeMode) }.getOrDefault(ThemeMode.SYSTEM)
 }
