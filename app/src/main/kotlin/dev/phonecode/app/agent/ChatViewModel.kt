@@ -45,6 +45,7 @@ import dev.phonecode.app.data.toPreset
 import dev.phonecode.app.data.toPersisted
 import dev.phonecode.provider.catalog.Catalog
 import dev.phonecode.provider.catalog.CatalogLoader
+import dev.phonecode.provider.catalog.catalogJson
 import dev.phonecode.provider.domain.ChatMessage
 import dev.phonecode.provider.domain.FailureKind
 import dev.phonecode.provider.domain.LlmProvider
@@ -525,8 +526,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         modelRefreshJob = viewModelScope.launch(Dispatchers.IO) {
             if (refreshCatalog) {
                 runCatching { catalogLoader.load(forceRefresh) }.getOrNull()?.let {
-                    catalog = it.catalog
-                    applyModelOptions(catalogToOptions(it.catalog))
+                    catalog = withBundledOverlay(it.catalog)
+                    applyModelOptions(catalogToOptions(catalog))
                     lastCatalogRefreshAt = System.currentTimeMillis()
                 }
             }
@@ -3135,6 +3136,26 @@ internal fun catalogProviderId(id: String): String = when (id) {
     else -> id
 }
 
+/**
+ * models.dev doesn't publish the first-party preset providers (opencode, opencode-go, sensenova);
+ * their model metadata (reasoning options, limits) ships only in the bundled snapshot. Overlay
+ * those entries onto whatever catalog loaded (network/cache/bundled) so the reasoning effort
+ * picker and limits for those models stay stable regardless of models.dev state.
+ */
+internal fun withBundledOverlay(live: Catalog, bundled: String = BUNDLED_CATALOG): Catalog {
+    val snapshot = runCatching { catalogJson.decodeFromString<Catalog>(bundled) }.getOrNull() ?: return live
+    val out = live.toMutableMap()
+    snapshot.forEach { (providerId, provider) ->
+        if (providerId !in BUNDLED_OVERLAY_PROVIDERS) return@forEach
+        val liveProvider = out[providerId]
+        out[providerId] = if (liveProvider == null) provider
+        else liveProvider.copy(models = liveProvider.models + provider.models)
+    }
+    return out
+}
+
+private val BUNDLED_OVERLAY_PROVIDERS = setOf("opencode", "opencode-go", "sensenova")
+
 internal fun visibleCodexModels(models: List<CodexModelInfo>): List<CodexModelInfo> =
     models.filter { it.visibility == "list" }
 
@@ -3198,7 +3219,7 @@ private const val CODEX_REFRESH_TTL_MS = 5L * 60 * 1000
 private const val MAX_TOOL_INPUT_CHARS = 64_000
 private const val STREAM_UI_INTERVAL_NANOS = 50_000_000L
 private val PROJECT_ID = Regex("[A-Za-z0-9][A-Za-z0-9._-]{0,119}")
-private const val BUNDLED_CATALOG = """
+internal const val BUNDLED_CATALOG = """
 {
   "openai":{"id":"openai","name":"OpenAI","models":{"gpt-5.6":{"id":"gpt-5.6","name":"GPT-5.6","reasoning":true,"reasoning_options":[{"type":"effort","values":["none","low","medium","high","xhigh","max"]}],"tool_call":true,"attachment":true,"limit":{"context":1050000,"output":128000}},"gpt-5.6-sol":{"id":"gpt-5.6-sol","name":"GPT-5.6 Sol","reasoning":true,"reasoning_options":[{"type":"effort","values":["none","low","medium","high","xhigh","max"]}],"tool_call":true,"attachment":true,"limit":{"context":1050000,"output":128000}},"gpt-5.6-terra":{"id":"gpt-5.6-terra","name":"GPT-5.6 Terra","reasoning":true,"reasoning_options":[{"type":"effort","values":["none","low","medium","high","xhigh","max"]}],"tool_call":true,"attachment":true,"limit":{"context":1050000,"output":128000}},"gpt-5.6-luna":{"id":"gpt-5.6-luna","name":"GPT-5.6 Luna","reasoning":true,"reasoning_options":[{"type":"effort","values":["none","low","medium","high","xhigh","max"]}],"tool_call":true,"attachment":true,"limit":{"context":1050000,"output":128000}},"gpt-5.5":{"id":"gpt-5.5","name":"GPT-5.5"},"o3":{"id":"o3","name":"o3"}}},
   "anthropic":{"id":"anthropic","name":"Anthropic","models":{"claude-opus-4-8":{"id":"claude-opus-4-8","name":"Claude Opus 4.8"},"claude-sonnet-4-6":{"id":"claude-sonnet-4-6","name":"Claude Sonnet 4.6"},"claude-haiku-4-5":{"id":"claude-haiku-4-5","name":"Claude Haiku 4.5"}}},
