@@ -2707,14 +2707,24 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 }
             }
             // Latest turn's tokens = current context occupancy (input already includes history), not a session sum.
-            is AgentEvent.Usage -> _state.update {
-                it.copy(
-                    usageInput = event.input,
-                    usageOutput = event.output,
-                    sessionInputTokens = it.sessionInputTokens + event.input,
-                    sessionOutputTokens = it.sessionOutputTokens + event.output,
-                    retry = null,
-                )
+            is AgentEvent.Usage -> {
+                _state.update {
+                    it.copy(
+                        usageInput = event.input,
+                        usageOutput = event.output,
+                        sessionInputTokens = it.sessionInputTokens + event.input,
+                        sessionOutputTokens = it.sessionOutputTokens + event.output,
+                        retry = null,
+                    )
+                }
+                // Persist token counts immediately (bypasses checkpoint write-order complexity).
+                runCatching {
+                    sessionStore.setTokenCounts(
+                        targetSessionId,
+                        _state.value.sessionInputTokens,
+                        _state.value.sessionOutputTokens,
+                    )
+                }
             }
             is AgentEvent.UserMessage -> {
                 // The agent just folded a queued message into the turn: flush the live reply, drop the

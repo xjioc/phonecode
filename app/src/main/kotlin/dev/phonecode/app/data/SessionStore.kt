@@ -276,6 +276,10 @@ class SessionStore(private val dir: File) {
         true
     }
 
+    fun setTokenCounts(id: String, input: Long, output: Long): Unit = locked {
+        load(id)?.let { save(it.copy(totalInputTokens = input, totalOutputTokens = output)) }
+    }
+
     private fun acceptsWrite(id: String, writeOrder: Long?): Boolean {
         if (!SAFE_ID.matches(id)) return false
         val key = deletionKey(id)
