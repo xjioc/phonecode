@@ -1733,6 +1733,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
 
     fun isToolDisabled(name: String): Boolean = appSettings.load().disabledTools.contains(name)
 
+    fun disabledToolNames(): Set<String> = appSettings.load().disabledTools
+
     fun availableTools(): List<AgentToolInfo> {
         val remoteNames = mcpTools.mapTo(mutableSetOf()) { it.name }
         return tools.all().sortedBy { it.name }.map { tool ->

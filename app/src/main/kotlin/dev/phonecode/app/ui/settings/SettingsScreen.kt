@@ -620,6 +620,7 @@ private fun AgentToolsPage(vm: ChatViewModel, onBack: () -> Unit) {
     val state by collectSettingsState(vm)
     var query by rememberSaveable { mutableStateOf("") }
     var accessFilter by rememberSaveable { mutableStateOf(AgentToolAccessFilter.ALL) }
+    var disabledTools by remember { mutableStateOf(vm.disabledToolNames()) }
     // Recompute from the current registry: tool identities can change while MCP/skill counts stay
     // constant (for example, reconnecting a different server with the same number of tools).
     val inventory = vm.availableTools()
@@ -655,7 +656,7 @@ private fun AgentToolsPage(vm: ChatViewModel, onBack: () -> Unit) {
             style = MaterialTheme.typography.bodySmall,
             color = colors.onSurfaceVariant,
         )
-        val disabledCount = remember(inventory) { inventory.count { vm.isToolDisabled(it.name) } }
+        val disabledCount = disabledTools.size
         if (disabledCount > 0) {
             Text(
                 "$disabledCount disabled",
@@ -682,8 +683,12 @@ private fun AgentToolsPage(vm: ChatViewModel, onBack: () -> Unit) {
                 PcSectionLabel("$source · ${entries.size}")
                 PcGroup {
                     entries.forEach { tool ->
-                        val toolDisabled = vm.isToolDisabled(tool.name)
-                        PcRow(onClick = { vm.toggleToolDisabled(tool.name, !toolDisabled) }) {
+                        val toolDisabled = tool.name in disabledTools
+                        PcRow(onClick = {
+                            val next = !toolDisabled
+                            vm.toggleToolDisabled(tool.name, next)
+                            disabledTools = if (next) disabledTools + tool.name else disabledTools - tool.name
+                        }) {
                             Column(Modifier.weight(1f)) {
                                 Text(
                                     tool.name,
@@ -704,7 +709,11 @@ private fun AgentToolsPage(vm: ChatViewModel, onBack: () -> Unit) {
                             AgentToolBadge(tool.access, emphasized = tool.access == "Read only")
                             PcToggle(
                                 !toolDisabled,
-                                { vm.toggleToolDisabled(tool.name, !it) },
+                                { checked ->
+                                    val disable = !checked
+                                    vm.toggleToolDisabled(tool.name, disable)
+                                    disabledTools = if (disable) disabledTools + tool.name else disabledTools - tool.name
+                                },
                                 "Enable ${tool.name}",
                             )
                         }
