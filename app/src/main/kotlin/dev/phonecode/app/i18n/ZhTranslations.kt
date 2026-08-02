@@ -151,6 +151,8 @@ val zhTranslations: Map<String, String> = mapOf(
     "Read only" to "只读",
     "Approval" to "需审批",
     "Conditional" to "有条件",
+    "Approval every time" to "每次审批",
+    "Depends on action" to "视操作而定",
     "Search tools" to "搜索工具",
     "No tools are available yet. Connect an MCP server or add a skill to extend PhoneCode." to
         "暂无可用工具。连接 MCP 服务器或添加技能来扩展 PhoneCode。",
