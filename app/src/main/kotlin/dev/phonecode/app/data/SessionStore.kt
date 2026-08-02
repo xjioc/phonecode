@@ -280,6 +280,24 @@ class SessionStore(private val dir: File) {
         load(id)?.let { save(it.copy(totalInputTokens = input, totalOutputTokens = output)) }
     }
 
+    /** Lightweight token-only persistence that bypasses session file entirely. */
+    fun saveTokenCounts(id: String, input: Long, output: Long) {
+        runCatching {
+            val file = File(dir, "$id.tokens")
+            file.writeText("$input\n$output")
+        }
+    }
+
+    fun loadTokenCounts(id: String): Pair<Long, Long> {
+        return runCatching {
+            val file = File(dir, "$id.tokens")
+            if (file.exists()) {
+                val lines = file.readLines()
+                (lines.getOrNull(0)?.toLongOrNull() ?: 0L) to (lines.getOrNull(1)?.toLongOrNull() ?: 0L)
+            } else 0L to 0L
+        }.getOrDefault(0L to 0L)
+    }
+
     private fun acceptsWrite(id: String, writeOrder: Long?): Boolean {
         if (!SAFE_ID.matches(id)) return false
         val key = deletionKey(id)

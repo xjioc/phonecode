@@ -478,8 +478,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                             lines = lines,
                             currentSessionId = latest.id,
                             currentProjectId = activeProjectId,
-                            sessionInputTokens = latest.totalInputTokens,
-                            sessionOutputTokens = latest.totalOutputTokens,
+                            sessionInputTokens = sessionStore.loadTokenCounts(latest.id).first,
+                            sessionOutputTokens = sessionStore.loadTokenCounts(latest.id).second,
                             error = if (interrupted) TURN_INTERRUPTED_MESSAGE else it.error,
                             interruptedTurn = interrupted,
                             turnOutcome = latest.turnOutcome?.let { saved ->
@@ -1247,8 +1247,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                         streamingReasoning = "",
                         usageInput = 0,
                         usageOutput = 0,
-                        sessionInputTokens = loaded.totalInputTokens,
-                        sessionOutputTokens = loaded.totalOutputTokens,
+                        sessionInputTokens = sessionStore.loadTokenCounts(loaded.id).first,
+                        sessionOutputTokens = sessionStore.loadTokenCounts(loaded.id).second,
                         error = if (interrupted) TURN_INTERRUPTED_MESSAGE else null,
                         interruptedTurn = interrupted,
                         turnOutcome = loaded.turnOutcome?.let { saved ->
@@ -2180,8 +2180,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                                 lines = restored.messages.toChatLines(),
                                 currentSessionId = restored.session.id,
                                 currentProjectId = activeProjectId,
-                                sessionInputTokens = restored.session.totalInputTokens,
-                                sessionOutputTokens = restored.session.totalOutputTokens,
+                                sessionInputTokens = sessionStore.loadTokenCounts(restored.session.id).first,
+                                sessionOutputTokens = sessionStore.loadTokenCounts(restored.session.id).second,
                                 sessions = restored.sessions,
                                 projects = restored.projects,
                                 sessionLoading = false,
@@ -2717,9 +2717,9 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                         retry = null,
                     )
                 }
-                // Persist token counts immediately (bypasses checkpoint write-order complexity).
+                // Persist token counts immediately to a dedicated file (bypasses session JSON entirely).
                 runCatching {
-                    sessionStore.setTokenCounts(
+                    sessionStore.saveTokenCounts(
                         targetSessionId,
                         _state.value.sessionInputTokens,
                         _state.value.sessionOutputTokens,
