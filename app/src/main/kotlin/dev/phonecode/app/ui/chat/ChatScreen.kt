@@ -2400,7 +2400,7 @@ private fun ContextPopover(state: ChatUiState) {
         if (sessionTotal > 0) {
             Box(Modifier.fillMaxWidth().padding(vertical = 10.dp).height(1.dp).background(colors.outlineVariant))
             Text("Session total", style = MaterialTheme.typography.labelSmall, color = colors.tertiary, modifier = Modifier.padding(bottom = 6.dp))
-            UsageBlock(state.sessionInputTokens, state.sessionOutputTokens, null)
+            UsageBlock(state.sessionInputTokens, state.sessionOutputTokens, state.contextLimit)
         }
     }
 }
@@ -2409,14 +2409,12 @@ private fun ContextPopover(state: ChatUiState) {
 private fun UsageBlock(input: Long, output: Long, limit: Long?) {
     val colors = MaterialTheme.colorScheme
     val used = input + output
-    val frac = limit?.let { if (it > 0) used.toFloat() / it else 0f } ?: run {
-        if (used > 0) input.toFloat() / used else 0f
-    }
+    val frac = limit?.let { if (it > 0) used.toFloat() / it else 0f } ?: 0f
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(13.dp), modifier = Modifier.padding(bottom = 10.dp)) {
-        ContextRing(fraction = frac, modifier = Modifier.size(52.dp), stroke = 3f, color = if (limit != null) contextUsageColor(frac) else colors.primary)
+        ContextRing(fraction = frac.coerceIn(0f, 1f), modifier = Modifier.size(52.dp), stroke = 3f, color = contextUsageColor(frac.coerceIn(0f, 1f)))
         Column {
             Text(
-                if (limit != null) "${(frac * 100).toInt()}%" else "${(frac * 100).toInt()}%",
+                if (limit != null) "${(frac * 100).toInt()}%" else fmt(used),
                 style = MaterialTheme.typography.headlineSmall, color = colors.onBackground,
             )
             Text(
