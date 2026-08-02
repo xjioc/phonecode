@@ -462,4 +462,66 @@ val zhTranslations: Map<String, String> = mapOf(
         "等待你在 GitHub 上授权——这将自动完成。",
     "Read-only tools work in Plan mode. Changes follow your approval setting in Files & permissions." to
         "只读工具在计划模式下工作。更改遵循“文件和权限”中的审批设置。",
+
+    // ─── Settings: Export & Import ────────────────────────────────────────────
+    "Your data" to "你的数据",
+    "Importing backup…" to "正在导入备份…",
+    "Exports are not encrypted. Saved provider and sign-in credentials are excluded, but chats and tool activity may contain sensitive content." to
+        "导出未加密。已保存的服务商和登录凭据不包含在内，但对话和工具活动可能包含敏感内容。",
+    "Import replaces chats and settings with the backup. Linked phone folders, provider keys, MCP servers, and skills are not included. Approval always returns to Ask before each change." to
+        "导入会用备份替换对话和设置。关联的手机文件夹、服务商密钥、MCP 服务器和技能不包含在内。审批始终恢复为“每次更改前询问”。",
+    "Export chats & settings" to "导出对话和设置",
+    "Import from a file" to "从文件导入",
+    "Replace chats and settings?" to "替换对话和设置？",
+    "Choose backup file" to "选择备份文件",
+    "Export first" to "先导出",
+
+    // ─── Settings: About ──────────────────────────────────────────────────────
+    "Website" to "网站",
+    "Config directory" to "配置目录",
+
+    // ─── Settings: MCP (additional) ───────────────────────────────────────────
+    "Servers" to "服务器",
+    "Search servers" to "搜索服务器",
+    "Add server" to "添加服务器",
+    "Reconnecting…" to "重新连接中…",
+    "Reconnect enabled servers" to "重新连接已启用的服务器",
+    "Connecting" to "连接中",
+    "Not tested" to "未测试",
+    "Off · Test to enable" to "已关闭·测试后启用",
+    "Testing…" to "测试中…",
+    "Test" to "测试",
+    "HTTP headers" to "HTTP 头",
+    "Add header" to "添加头",
+    "Connection timeout" to "连接超时",
+    "Enabled" to "已启用",
+    "Test successfully before enabling" to "启用前请先成功测试",
+    "Server" to "服务器",
+    "Name" to "名称",
+    "Protocol" to "协议",
+    "Advertised capabilities" to "声明的能力",
+    "None" to "无",
+    "Available in PhoneCode" to "在 PhoneCode 中可用",
+    "No tool calls" to "无工具调用",
+    "Tool calls" to "工具调用",
+    "This server exposes no tools." to "此服务器未提供工具。",
+    "Header values are concealed after saving and encrypted with Android Keystore." to
+        "头值在保存后会被隐藏，并使用 Android Keystore 加密。",
+    "No MCP servers configured. Add one over HTTPS, or use local HTTP for a server on this device." to
+        "未配置 MCP 服务器。通过 HTTPS 添加，或对本地服务器使用 HTTP。",
+    "The existing opencode.json has been preserved. Fix it before changing MCP servers here." to
+        "已保留现有的 opencode.json。请先修复它，再在此处更改 MCP 服务器。",
+    "Your saved server list is still available. Review the affected server and try again." to
+        "你保存的服务器列表仍然可用。请检查受影响的服务器并重试。",
+    "MCP servers receive tool inputs from the agent. Review the reported tools before enabling; mutating actions follow your approval setting." to
+        "MCP 服务器会接收代理的工具输入。启用前请审查报告的工具；变更操作遵循你的审批设置。",
+    "Test this changed configuration and review its reported tools before saving it enabled." to
+        "请先测试此更改的配置并审查其报告的工具，然后再保存为启用状态。",
+
+    // ─── Settings: Git (additional) ───────────────────────────────────────────
+    "Save manual credentials" to "保存手动凭据",
+    "Manual Git credentials could not be saved securely." to "手动 Git 凭据无法安全保存。",
+    "Sign out of GitHub?" to "登出 GitHub？",
+    "This disconnects the GitHub account and clears manual Git credentials. Local repositories and commits stay on this device." to
+        "这将断开 GitHub 账户并清除手动 Git 凭据。本地仓库和提交仍保留在此设备上。",
 )
