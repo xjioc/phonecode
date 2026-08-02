@@ -14,7 +14,7 @@ class BundledCatalogOverlayTest {
 
     @Test
     fun overlayAddsFirstPartyProvidersMissingFromLiveCatalog() {
-        val merged = withBundledOverlay(catalog("openai", """{"id":"openai","models":{}}"""))
+        val merged = withBundledOverlay(catalog("openai", """{"id":"openai","name":"OpenAI","models":{}}"""))
 
         val sensenova = merged["sensenova"] ?: error("sensenova missing after overlay")
         assertEquals(
@@ -51,7 +51,7 @@ class BundledCatalogOverlayTest {
     fun overlayBackfillsReasoningOptionsWhenLiveEntryLacksThem() {
         val live = catalog(
             "sensenova",
-            """{"id":"sensenova","models":{"glm-5.2":{"id":"glm-5.2","name":"GLM 5.2","reasoning":true}}}""",
+            """{"id":"sensenova","name":"SenseNova","models":{"glm-5.2":{"id":"glm-5.2","name":"GLM 5.2","reasoning":true}}}""",
         )
         val merged = withBundledOverlay(live)
 
@@ -64,7 +64,7 @@ class BundledCatalogOverlayTest {
     fun overlayKeepsLiveModelsAlongsideBundledOnes() {
         val live = catalog(
             "sensenova",
-            """{"id":"sensenova","models":{"future-model":{"id":"future-model","name":"Future","reasoning":true}}}""",
+            """{"id":"sensenova","name":"SenseNova","models":{"future-model":{"id":"future-model","name":"Future","reasoning":true}}}""",
         )
         val merged = withBundledOverlay(live)
 
