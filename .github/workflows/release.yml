@@ -23,6 +23,8 @@ jobs:
       - uses: gradle/actions/setup-gradle@v6
 
       - name: Build sideload APK
+        env:
+          PHONECODE_GITHUB_OAUTH_CLIENT_ID: ${{ secrets.PHONECODE_GITHUB_OAUTH_CLIENT_ID }}
         run: ./gradlew --no-daemon :app:assembleSideload
 
       - name: Create Release
