@@ -478,6 +478,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                             lines = lines,
                             currentSessionId = latest.id,
                             currentProjectId = activeProjectId,
+                            sessionInputTokens = latest.totalInputTokens,
+                            sessionOutputTokens = latest.totalOutputTokens,
                             error = if (interrupted) TURN_INTERRUPTED_MESSAGE else it.error,
                             interruptedTurn = interrupted,
                             turnOutcome = latest.turnOutcome?.let { saved ->
@@ -2178,6 +2180,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                                 lines = restored.messages.toChatLines(),
                                 currentSessionId = restored.session.id,
                                 currentProjectId = activeProjectId,
+                                sessionInputTokens = restored.session.totalInputTokens,
+                                sessionOutputTokens = restored.session.totalOutputTokens,
                                 sessions = restored.sessions,
                                 projects = restored.projects,
                                 sessionLoading = false,
