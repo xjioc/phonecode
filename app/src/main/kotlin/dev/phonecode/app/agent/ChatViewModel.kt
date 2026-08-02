@@ -1717,6 +1717,22 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun configDirPath(): String = configDir.absolutePath
+
+    /** Tools filtered by the user's disabled-tools setting; disabled tools are invisible to the agent. */
+    private fun filteredTools(): ToolRegistry {
+        val disabled = appSettings.load().disabledTools
+        if (disabled.isEmpty()) return tools
+        return ToolRegistry(tools.all().filterNot { it.name in disabled })
+    }
+
+    fun toggleToolDisabled(name: String, disabled: Boolean) {
+        appSettings.update {
+            it.copy(disabledTools = if (disabled) it.disabledTools + name else it.disabledTools - name)
+        }
+    }
+
+    fun isToolDisabled(name: String): Boolean = appSettings.load().disabledTools.contains(name)
+
     fun availableTools(): List<AgentToolInfo> {
         val remoteNames = mcpTools.mapTo(mutableSetOf()) { it.name }
         return tools.all().sortedBy { it.name }.map { tool ->
@@ -2250,14 +2266,14 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             sessionId = "phonecode-sub-${java.util.UUID.randomUUID()}",
             projectInstructions = loadProjectInstructions(turnWorkspace ?: workspace, appSettings.load().customInstructions),
         )
-        val childTools = ToolRegistry(tools.all().filterNot { it.name == "task" || it.planOnly })
+        val childTools = ToolRegistry(filteredTools().all().filterNot { it.name == "task" || it.planOnly })
         val childLoop = AgentLoop(
             provider, childTools, toolContext, childConfig,
             turnSettings = { boundedTurnSettings(selected.modelId, childEffort, childLimit) },
             modeProvider = { parentMode },
             toolProvider = {
                 refreshRuntimeConfiguration()
-                ToolRegistry(tools.all().filterNot { it.name == "task" || it.planOnly })
+                ToolRegistry(filteredTools().all().filterNot { it.name == "task" || it.planOnly })
             },
             mcpInstructionsProvider = { mcpInstructions() },
         )
@@ -2404,7 +2420,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                     modeProvider = { _state.value.agentMode }, // live so a plan_exit approval flips PLAN→BUILD mid-run
                     toolProvider = {
                         refreshRuntimeConfiguration()
-                        tools
+                        filteredTools()
                     },
                     mcpInstructionsProvider = { mcpInstructions() },
                 )

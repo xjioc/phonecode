@@ -19,6 +19,8 @@ data class AppSettings(
     val activeSessionId: String? = null,
     /** UI language override: "SYSTEM" follows device locale, otherwise a BCP-47 tag like "zh" or "en". */
     val language: String = "SYSTEM",
+    /** Tools the user has explicitly disabled; hidden from the agent entirely. */
+    val disabledTools: Set<String> = emptySet(),
 ) {
     val mode: ThemeMode get() = runCatching { ThemeMode.valueOf(themeMode) }.getOrDefault(ThemeMode.SYSTEM)
 }

@@ -655,6 +655,14 @@ private fun AgentToolsPage(vm: ChatViewModel, onBack: () -> Unit) {
             style = MaterialTheme.typography.bodySmall,
             color = colors.onSurfaceVariant,
         )
+        val disabledCount = remember(inventory) { inventory.count { vm.isToolDisabled(it.name) } }
+        if (disabledCount > 0) {
+            Text(
+                "$disabledCount disabled",
+                style = MaterialTheme.typography.bodySmall,
+                color = colors.tertiary,
+            )
+        }
         Note("Read-only tools work in Plan mode. Changes follow your approval setting in Files & permissions.")
         PcField(query, { query = it }, "Search tools", contentDescription = "Search tools")
         AgentToolFilters(accessFilter) { accessFilter = it }
@@ -674,25 +682,31 @@ private fun AgentToolsPage(vm: ChatViewModel, onBack: () -> Unit) {
                 PcSectionLabel("$source · ${entries.size}")
                 PcGroup {
                     entries.forEach { tool ->
-                        PcRow {
+                        val toolDisabled = vm.isToolDisabled(tool.name)
+                        PcRow(onClick = { vm.toggleToolDisabled(tool.name, !toolDisabled) }) {
                             Column(Modifier.weight(1f)) {
                                 Text(
                                     tool.name,
                                     style = MaterialTheme.typography.bodyLarge.copy(fontFamily = PcMono),
-                                    color = colors.onBackground,
+                                    color = if (toolDisabled) colors.tertiary else colors.onBackground,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
                                 )
                                 Text(
                                     tool.description,
                                     style = MaterialTheme.typography.bodySmall,
-                                    color = colors.onSurfaceVariant,
+                                    color = if (toolDisabled) colors.tertiary else colors.onSurfaceVariant,
                                     maxLines = 2,
                                     overflow = TextOverflow.Ellipsis,
                                 )
                             }
                             Spacer(Modifier.width(10.dp))
                             AgentToolBadge(tool.access, emphasized = tool.access == "Read only")
+                            PcToggle(
+                                !toolDisabled,
+                                { vm.toggleToolDisabled(tool.name, !it) },
+                                "Enable ${tool.name}",
+                            )
                         }
                     }
                 }
