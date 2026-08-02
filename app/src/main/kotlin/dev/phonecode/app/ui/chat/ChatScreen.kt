@@ -2415,9 +2415,12 @@ private fun UsageBlock(input: Long, output: Long, limit: Long?) {
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(13.dp), modifier = Modifier.padding(bottom = 10.dp)) {
         ContextRing(fraction = frac, modifier = Modifier.size(52.dp), stroke = 3f, color = if (limit != null) contextUsageColor(frac) else colors.primary)
         Column {
-            Text(if (limit != null) "${(frac * 100).toInt()}%" else fmt(used), style = MaterialTheme.typography.headlineSmall, color = colors.onBackground)
             Text(
-                if (limit != null) "${fmt(used)} / ${fmt(limit)} tokens" else "tokens",
+                if (limit != null) "${(frac * 100).toInt()}%" else "${(frac * 100).toInt()}%",
+                style = MaterialTheme.typography.headlineSmall, color = colors.onBackground,
+            )
+            Text(
+                if (limit != null) "${fmt(used)} / ${fmt(limit)} tokens" else "${fmt(used)} tokens",
                 style = MaterialTheme.typography.labelSmall, color = colors.tertiary,
             )
         }
