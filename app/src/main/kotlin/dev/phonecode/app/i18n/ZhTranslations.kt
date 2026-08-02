@@ -88,6 +88,10 @@ val zhTranslations: Map<String, String> = mapOf(
     "Done" to "完成",
     "Copy" to "复制",
     "Redo" to "重新生成",
+    "Edit message" to "编辑消息",
+    "Delete message" to "删除消息",
+    "This turn" to "本轮",
+    "Session total" to "会话累计",
     "Send safety feedback" to "发送安全反馈",
     "Feedback sent" to "反馈已发送",
     "Thank you. Your feedback will be used to improve PhoneCode's safeguards." to

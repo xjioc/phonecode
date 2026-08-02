@@ -85,6 +85,7 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Menu
@@ -94,6 +95,7 @@ import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.outlined.Build
 import androidx.compose.material.icons.outlined.Checklist
+import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Flag
@@ -432,7 +434,19 @@ fun ChatScreen(
                             val rhythm = if (line is ChatLine.ToolActivity) 3.dp else 8.dp
                             Box(Modifier.messageEnter(shouldAnimate).padding(vertical = rhythm)) {
                                 when (line) {
-                                    is ChatLine.User -> UserBubble(line.text, line.images)
+                                    is ChatLine.User -> UserBubble(
+                                        text = line.text,
+                                        images = line.images,
+                                        showActions = !state.isRunning,
+                                        onEdit = {
+                                            val msgText = vm.userTextAt(i)
+                                            if (msgText != null) {
+                                                vm.truncateFrom(i)
+                                                input = msgText
+                                            }
+                                        },
+                                        onDelete = { vm.truncateFrom(i) },
+                                    )
                                     is ChatLine.Assistant -> AssistantTurn(
                                         text = line.text,
                                         reasoning = reasoningBefore(state.lines, i),
@@ -930,7 +944,13 @@ private fun QueuedMessages(
 }
 
 @Composable
-private fun UserBubble(text: String, images: List<MessagePart.Image>) {
+private fun UserBubble(
+    text: String,
+    images: List<MessagePart.Image>,
+    showActions: Boolean = false,
+    onEdit: () -> Unit = {},
+    onDelete: () -> Unit = {},
+) {
     val colors = MaterialTheme.colorScheme
     val clipboard = LocalClipboardManager.current
     var copied by remember(text) { mutableStateOf(false) }
@@ -966,17 +986,26 @@ private fun UserBubble(text: String, images: List<MessagePart.Image>) {
                 }
             }
             if (text.isNotEmpty()) {
-                Box(
-                    Modifier.semantics(mergeDescendants = true) {
-                        liveRegion = LiveRegionMode.Polite
-                        stateDescription = if (copied) "Copied" else "Ready to copy"
-                    },
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(3.dp),
                 ) {
-                    ActionIcon(
-                        if (copied) Icons.Filled.Check else Icons.Filled.ContentCopy,
-                        if (copied) "Copied" else "Copy message",
-                        ::copyMessage,
-                    )
+                    Box(
+                        Modifier.semantics(mergeDescendants = true) {
+                            liveRegion = LiveRegionMode.Polite
+                            stateDescription = if (copied) "Copied" else "Ready to copy"
+                        },
+                    ) {
+                        ActionIcon(
+                            if (copied) Icons.Filled.Check else Icons.Filled.ContentCopy,
+                            if (copied) "Copied" else "Copy message",
+                            ::copyMessage,
+                        )
+                    }
+                    if (showActions) {
+                        ActionIcon(Icons.Filled.Edit, "Edit message", onEdit)
+                        ActionIcon(Icons.Outlined.Delete, "Delete message", onDelete)
+                    }
                 }
             }
         }
@@ -1037,12 +1066,14 @@ private fun AssistantTurn(
             ) {
                 Row(Modifier.padding(start = 3.dp, top = 6.dp).height(IntrinsicSize.Min)) {
                     Box(Modifier.width(1.5.dp).fillMaxHeight().background(colors.outlineVariant))
-                    Text(
-                        reasoning,
-                        style = MaterialTheme.typography.labelMedium,
-                        color = colors.tertiary,
-                        modifier = Modifier.padding(start = 13.dp),
-                    )
+                    SelectionContainer {
+                        Text(
+                            reasoning,
+                            style = MaterialTheme.typography.labelMedium,
+                            color = colors.tertiary,
+                            modifier = Modifier.padding(start = 13.dp),
+                        )
+                    }
                 }
             }
         }
@@ -1052,19 +1083,19 @@ private fun AssistantTurn(
             val segments = remember(text, streaming) {
                 if (streaming) fenceParser.update(text) else splitFenced(text)
             }
-            Column(Modifier.fillMaxWidth().padding(top = if (reasoning != null) 11.dp else 0.dp), verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
-                segments.forEachIndexed { i, seg ->
-                    val live = streaming && i == segments.lastIndex
-                    when {
-                        // Render a settled mermaid block as a diagram; while it is still streaming keep it as
-                        // code (the source is incomplete and would render as an error).
-                        seg.isCode && seg.lang.equals("mermaid", ignoreCase = true) && !live ->
-                            MermaidDiagram(seg.text)
-                        seg.isCode -> CodeBlock(seg.text, seg.lang)
-                        else -> MarkdownBlocks(seg.text, caret = if (live) " ▋" else "", streaming = live)
+            SelectionContainer {
+                Column(Modifier.fillMaxWidth().padding(top = if (reasoning != null) 11.dp else 0.dp), verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
+                    segments.forEachIndexed { i, seg ->
+                        val live = streaming && i == segments.lastIndex
+                        when {
+                            seg.isCode && seg.lang.equals("mermaid", ignoreCase = true) && !live ->
+                                MermaidDiagram(seg.text)
+                            seg.isCode -> CodeBlock(seg.text, seg.lang)
+                            else -> MarkdownBlocks(seg.text, caret = if (live) " ▋" else "", streaming = live)
+                        }
                     }
+                    if (segments.isEmpty() && streaming) Text("▋", style = MaterialTheme.typography.bodyMedium, color = colors.secondary)
                 }
-                if (segments.isEmpty() && streaming) Text("▋", style = MaterialTheme.typography.bodyMedium, color = colors.secondary)
             }
         }
 
@@ -2362,23 +2393,37 @@ private const val CUSTOM_ANSWER_PREFIX = "Custom: "
 @Composable
 private fun ContextPopover(state: ChatUiState) {
     val colors = MaterialTheme.colorScheme
-    val used = state.usageInput + state.usageOutput
-    val limit = state.contextLimit
-    val frac = limit?.let { if (it > 0) used.toFloat() / it else 0f } ?: 0f
     PopoverCard {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(13.dp), modifier = Modifier.padding(bottom = 10.dp)) {
-            ContextRing(fraction = frac, modifier = Modifier.size(52.dp), stroke = 3f, color = contextUsageColor(frac))
-            Column {
-                Text(if (limit != null) "${(frac * 100).toInt()}%" else fmt(used), style = MaterialTheme.typography.headlineSmall, color = colors.onBackground)
-                Text(
-                    if (limit != null) "${fmt(used)} / ${fmt(limit)} tokens" else "tokens this turn",
-                    style = MaterialTheme.typography.labelSmall, color = colors.tertiary,
-                )
-            }
+        Text("This turn", style = MaterialTheme.typography.labelSmall, color = colors.tertiary, modifier = Modifier.padding(bottom = 6.dp))
+        UsageBlock(state.usageInput, state.usageOutput, state.contextLimit)
+        val sessionTotal = state.sessionInputTokens + state.sessionOutputTokens
+        if (sessionTotal > 0) {
+            Box(Modifier.fillMaxWidth().padding(vertical = 10.dp).height(1.dp).background(colors.outlineVariant))
+            Text("Session total", style = MaterialTheme.typography.labelSmall, color = colors.tertiary, modifier = Modifier.padding(bottom = 6.dp))
+            UsageBlock(state.sessionInputTokens, state.sessionOutputTokens, null)
         }
-        UsageRow("Input", fmt(state.usageInput), colors.onBackground)
-        UsageRow("Output", fmt(state.usageOutput), colors.secondary)
     }
+}
+
+@Composable
+private fun UsageBlock(input: Long, output: Long, limit: Long?) {
+    val colors = MaterialTheme.colorScheme
+    val used = input + output
+    val frac = limit?.let { if (it > 0) used.toFloat() / it else 0f } ?: run {
+        if (used > 0) input.toFloat() / used else 0f
+    }
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(13.dp), modifier = Modifier.padding(bottom = 10.dp)) {
+        ContextRing(fraction = frac, modifier = Modifier.size(52.dp), stroke = 3f, color = if (limit != null) contextUsageColor(frac) else colors.primary)
+        Column {
+            Text(if (limit != null) "${(frac * 100).toInt()}%" else fmt(used), style = MaterialTheme.typography.headlineSmall, color = colors.onBackground)
+            Text(
+                if (limit != null) "${fmt(used)} / ${fmt(limit)} tokens" else "tokens",
+                style = MaterialTheme.typography.labelSmall, color = colors.tertiary,
+            )
+        }
+    }
+    UsageRow("Input", fmt(input), colors.onBackground)
+    UsageRow("Output", fmt(output), colors.secondary)
 }
 
 @Composable

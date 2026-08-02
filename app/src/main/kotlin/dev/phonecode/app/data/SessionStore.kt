@@ -44,6 +44,8 @@ data class PersistedSession(
     val turnOutcome: String? = null,
     val queuedMessages: List<String> = emptyList(),
     val agentMode: String? = null,
+    val totalInputTokens: Long = 0,
+    val totalOutputTokens: Long = 0,
 )
 
 /** Lightweight catalog row for the sessions list (one-line preview, no full message bodies). */

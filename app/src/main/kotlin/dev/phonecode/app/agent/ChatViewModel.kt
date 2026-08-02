@@ -255,6 +255,8 @@ data class ChatUiState(
     val disabledProviders: Set<String> = emptySet(),
     val usageInput: Long = 0,
     val usageOutput: Long = 0,
+    val sessionInputTokens: Long = 0,
+    val sessionOutputTokens: Long = 0,
     val contextLimit: Long? = null,
     val currentSessionId: String = "",
     val currentProjectId: String? = null,
@@ -1164,6 +1166,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 streamingReasoning = "",
                 usageInput = 0,
                 usageOutput = 0,
+                sessionInputTokens = 0,
+                sessionOutputTokens = 0,
                 error = null,
                 interruptedTurn = false,
                 turnOutcome = null,
@@ -1241,6 +1245,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                         streamingReasoning = "",
                         usageInput = 0,
                         usageOutput = 0,
+                        sessionInputTokens = loaded.totalInputTokens,
+                        sessionOutputTokens = loaded.totalOutputTokens,
                         error = if (interrupted) TURN_INTERRUPTED_MESSAGE else null,
                         interruptedTurn = interrupted,
                         turnOutcome = loaded.turnOutcome?.let { saved ->
@@ -2487,6 +2493,34 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** Returns the text of the user message at [lineIndex], or null if not a user line. */
+    fun userTextAt(lineIndex: Int): String? =
+        (_state.value.lines.getOrNull(lineIndex) as? ChatLine.User)?.text
+
+    /**
+     * Truncates history and UI lines to before the user message at [lineIndex].
+     * Used by "edit" (caller re-fills the composer) and "delete" (just removes).
+     */
+    fun truncateFrom(lineIndex: Int) {
+        if (_state.value.isRunning) return
+        val lines = _state.value.lines
+        if (lineIndex < 0 || lineIndex >= lines.size) return
+        if (lines[lineIndex] !is ChatLine.User) return
+        // Count user messages before this line to find the matching history cut point.
+        val userCountBefore = lines.take(lineIndex).count { it is ChatLine.User }
+        var seen = 0
+        val historyCut = history.indexOfFirst { m ->
+            if (m.role == Role.USER && m.parts.any { it is MessagePart.Text }) {
+                if (seen == userCountBefore) return@indexOfFirst true
+                seen++
+            }
+            false
+        }
+        if (historyCut >= 0) history = history.take(historyCut)
+        _state.update { it.copy(lines = lines.take(lineIndex), timelineEpoch = it.timelineEpoch + 1) }
+        persist(history, activeTurn = false, targetSessionId = _state.value.currentSessionId, targetProjectId = _state.value.currentProjectId, targetAgentMode = _state.value.agentMode, expectedGeneration = generation)
+    }
+
     fun cancel() {
         val (stoppedWriteOrder, stoppedQueued) = synchronized(queueStateLock) {
             generation++ // invalidate the in-flight turn's events immediately, then clean up here (single owner)
@@ -2669,7 +2703,15 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 }
             }
             // Latest turn's tokens = current context occupancy (input already includes history), not a session sum.
-            is AgentEvent.Usage -> _state.update { it.copy(usageInput = event.input, usageOutput = event.output, retry = null) }
+            is AgentEvent.Usage -> _state.update {
+                it.copy(
+                    usageInput = event.input,
+                    usageOutput = event.output,
+                    sessionInputTokens = it.sessionInputTokens + event.input,
+                    sessionOutputTokens = it.sessionOutputTokens + event.output,
+                    retry = null,
+                )
+            }
             is AgentEvent.UserMessage -> {
                 // The agent just folded a queued message into the turn: flush the live reply, drop the
                 // message into the timeline in order, and clear it from the pending list.
@@ -2803,6 +2845,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                     turnOutcome = turnOutcome?.name,
                     queuedMessages = queuedMessages,
                     agentMode = targetAgentMode.name,
+                    totalInputTokens = _state.value.sessionInputTokens,
+                    totalOutputTokens = _state.value.sessionOutputTokens,
                 ),
                 writeOrder,
             )
