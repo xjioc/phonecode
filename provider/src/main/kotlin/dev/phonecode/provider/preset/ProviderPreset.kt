@@ -116,6 +116,14 @@ object BuiltInPresets {
         authScheme = AuthScheme.BEARER,
     )
 
+    val sensenova = ProviderPreset(
+        id = "sensenova",
+        displayName = "SenseNova",
+        baseUrl = "https://token.sensenova.cn/v1",
+        wireFormat = WireFormat.OPENAI_COMPAT,
+        authScheme = AuthScheme.BEARER,
+    )
+
     /**
      * ChatGPT "Sign in with ChatGPT" (Codex). Speaks the Responses API against the ChatGPT backend; the key
      * is the OAuth access token (Bearer), and the per-user `chatgpt-account-id` header is attached at send
@@ -136,7 +144,7 @@ object BuiltInPresets {
 
     // Together + Groq removed per user direction (round-3 feedback); OpenCode Go added.
     val all: List<ProviderPreset> = listOf(
-        openai, anthropic, openrouter, opencodeZen, opencodeGo, google, xai, deepseek, mistral, codex,
+        openai, anthropic, openrouter, opencodeZen, opencodeGo, google, xai, deepseek, mistral, sensenova, codex,
     )
 
     fun byId(id: String): ProviderPreset? = all.firstOrNull { it.id == id }

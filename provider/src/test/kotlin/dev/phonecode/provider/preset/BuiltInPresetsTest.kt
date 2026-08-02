@@ -6,7 +6,7 @@ import org.junit.Test
 class BuiltInPresetsTest {
 
     @Test fun presetsWithExpectedWiring() {
-        assertEquals(10, BuiltInPresets.all.size)
+        assertEquals(11, BuiltInPresets.all.size)
 
         // ChatGPT/Codex speaks the Responses API; the OAuth token is the Bearer key.
         val codex = BuiltInPresets.byId("codex")!!
@@ -37,7 +37,7 @@ class BuiltInPresetsTest {
         assertEquals("https://generativelanguage.googleapis.com/v1beta/openai", google.baseUrl)
         assertEquals(WireFormat.OPENAI_COMPAT, google.wireFormat)
         assertEquals(AuthScheme.BEARER, google.authScheme)
-        listOf("xai", "deepseek", "mistral", "opencode-go").forEach { id ->
+        listOf("xai", "deepseek", "mistral", "sensenova", "opencode-go").forEach { id ->
             val p = BuiltInPresets.byId(id)!!
             assertEquals(WireFormat.OPENAI_COMPAT, p.wireFormat)
             assertEquals(AuthScheme.BEARER, p.authScheme)

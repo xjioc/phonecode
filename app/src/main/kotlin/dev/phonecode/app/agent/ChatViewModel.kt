@@ -3105,6 +3105,9 @@ fun builtInModels(codexOAuthEnabled: Boolean = BuildConfig.CODEX_OAUTH_ENABLED):
     ModelOption("deepseek", "deepseek-chat", "DeepSeek Chat"),
     ModelOption("deepseek", "deepseek-reasoner", "DeepSeek Reasoner"),
     ModelOption("mistral", "mistral-large-latest", "Mistral Large"),
+    ModelOption("sensenova", "glm-5.2", "SenseNova · GLM 5.2"),
+    ModelOption("sensenova", "deepseek-v4-flash", "SenseNova · DeepSeek V4 Flash"),
+    ModelOption("sensenova", "sensenova-6.7-flash-lite", "SenseNova · 6.7 Flash-Lite"),
     ModelOption("codex", "gpt-5.6-sol", "ChatGPT · GPT-5.6 Sol"),
     ModelOption("codex", "gpt-5.6-terra", "ChatGPT · GPT-5.6 Terra"),
     ModelOption("codex", "gpt-5.6-luna", "ChatGPT · GPT-5.6 Luna"),
@@ -3125,6 +3128,7 @@ private const val BUNDLED_CATALOG = """
   "anthropic":{"id":"anthropic","name":"Anthropic","models":{"claude-opus-4-8":{"id":"claude-opus-4-8","name":"Claude Opus 4.8"},"claude-sonnet-4-6":{"id":"claude-sonnet-4-6","name":"Claude Sonnet 4.6"},"claude-haiku-4-5":{"id":"claude-haiku-4-5","name":"Claude Haiku 4.5"}}},
   "openrouter":{"id":"openrouter","name":"OpenRouter","models":{"anthropic/claude-opus-4-8":{"id":"anthropic/claude-opus-4-8","name":"Claude Opus 4.8"}}},
   "opencode":{"id":"opencode","name":"OpenCode Zen","models":{"nemotron-3-ultra-free":{"id":"nemotron-3-ultra-free","name":"Nemotron 3 Ultra Free"}}},
-  "opencode-go":{"id":"opencode-go","name":"OpenCode Go","api":"https://opencode.ai/zen/go/v1","models":{"deepseek-v4-flash":{"id":"deepseek-v4-flash","name":"DeepSeek V4 Flash","reasoning":true,"reasoning_options":[{"type":"effort","values":["high","max"]}],"tool_call":true,"attachment":false,"limit":{"context":1000000,"output":384000}},"mimo-v2.5":{"id":"mimo-v2.5","name":"MiMo V2.5","reasoning":true,"tool_call":true,"attachment":true,"limit":{"context":1000000,"output":128000}}}}
+  "opencode-go":{"id":"opencode-go","name":"OpenCode Go","api":"https://opencode.ai/zen/go/v1","models":{"deepseek-v4-flash":{"id":"deepseek-v4-flash","name":"DeepSeek V4 Flash","reasoning":true,"reasoning_options":[{"type":"effort","values":["high","max"]}],"tool_call":true,"attachment":false,"limit":{"context":1000000,"output":384000}},"mimo-v2.5":{"id":"mimo-v2.5","name":"MiMo V2.5","reasoning":true,"tool_call":true,"attachment":true,"limit":{"context":1000000,"output":128000}}}},
+  "sensenova":{"id":"sensenova","name":"SenseNova","models":{"glm-5.2":{"id":"glm-5.2","name":"GLM 5.2","reasoning":true,"reasoning_options":[{"type":"effort","values":["none","low","medium","high"]}],"tool_call":true,"attachment":false,"limit":{"context":1048576,"output":131072}},"deepseek-v4-flash":{"id":"deepseek-v4-flash","name":"DeepSeek V4 Flash","reasoning":true,"reasoning_options":[{"type":"effort","values":["none","low","medium","high"]}],"tool_call":true,"attachment":false,"limit":{"context":1048576,"output":65536}},"sensenova-6.7-flash-lite":{"id":"sensenova-6.7-flash-lite","name":"SenseNova 6.7 Flash-Lite","reasoning":true,"tool_call":true,"attachment":true,"limit":{"context":262144,"output":65536}}}}
 }
 """
