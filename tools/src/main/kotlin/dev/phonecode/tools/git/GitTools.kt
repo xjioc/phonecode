@@ -15,13 +15,10 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonObject
 import org.eclipse.jgit.api.Git
 import org.eclipse.jgit.api.Status
-import org.eclipse.jgit.dircache.DirCacheIterator
-import org.eclipse.jgit.diff.DiffFormatter
 import org.eclipse.jgit.transport.RemoteRefUpdate
 import org.eclipse.jgit.transport.UsernamePasswordCredentialsProvider
 import org.eclipse.jgit.transport.URIish
 import org.eclipse.jgit.storage.file.FileRepositoryBuilder
-import org.eclipse.jgit.treewalk.FileTreeIterator
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.nio.file.Files
@@ -102,13 +99,16 @@ class GitInitTool : Tool {
     override val description = "Initialize a new git repository in the workspace."
     override val mutating = true
     override val promptSnippet = "initialize a git repository in the workspace"
-    override val parameters = NO_PARAMS
+    override val parameters = objectSchema(mapOf("branch" to strSchema("Initial branch name (default: repository default)")), emptyList())
     override suspend fun execute(args: JsonObject, context: ToolContext): ToolResult = withContext(Dispatchers.IO) {
         runCatching {
             val workspace = File(context.workspacePath).canonicalFile
             gitDirectory(workspace)
-            Git.init().setDirectory(workspace).setFs(NoExecFs()).call().use {}
-            ToolResult("git: initialized repository")
+            val initial = args.str("branch")?.takeIf { it.isNotBlank() }
+            val init = Git.init().setDirectory(workspace).setFs(NoExecFs())
+            if (initial != null) init.setInitialBranch(initial)
+            init.call().use {}
+            ToolResult("git: initialized repository" + if (initial != null) " (branch: $initial)" else "")
         }
             .getOrElse { ToolResult("git_init: ${it.message}", isError = true) }
     }
@@ -124,28 +124,34 @@ class GitStatusTool : Tool {
 
 class GitDiffTool : Tool {
     override val name = "git_diff"
-    override val description = "Show the diff. Defaults to unstaged (working tree vs index); pass staged=true for staged changes."
+    override val description = "Show the diff. Defaults to unstaged (working tree vs index); pass staged=true for staged changes. " +
+        "Optionally filter by path, or list changed files instead of full diffs with nameOnly/nameStatus (nameStatus wins if both are set)."
     override val promptSnippet = "show the git diff (unstaged, or staged)"
-    override val parameters = objectSchema(mapOf("staged" to boolSchema("true to show staged changes (default false)")), emptyList())
+    override val parameters = objectSchema(
+        mapOf(
+            "staged" to boolSchema("true to show staged changes (default false)"),
+            "path" to strSchema("Only show changes under this file or directory path (optional)"),
+            "nameOnly" to boolSchema("true to list only changed file names (default false)"),
+            "nameStatus" to boolSchema("true to list changed files with status letters A/M/D (default false)"),
+        ),
+        emptyList(),
+    )
     override suspend fun execute(args: JsonObject, context: ToolContext): ToolResult {
         val staged = args.bool("staged") == true
+        val path = args.str("path")?.takeIf { it.isNotBlank() }
+        val nameOnly = args.bool("nameOnly") == true
+        val nameStatus = args.bool("nameStatus") == true
         return withRepo(context, name) { git ->
-            val repo = git.repository
             val out = ByteArrayOutputStream()
-            DiffFormatter(out).use { df ->
-                df.setRepository(repo)
-                if (staged) {
-                    val head = repo.resolve("HEAD^{tree}")
-                    val oldTree = if (head != null) {
-                        org.eclipse.jgit.treewalk.CanonicalTreeParser().apply { reset(repo.newObjectReader(), head) }
-                    } else {
-                        org.eclipse.jgit.treewalk.EmptyTreeIterator()
-                    }
-                    df.format(oldTree, DirCacheIterator(repo.readDirCache()))
-                } else {
-                    df.format(DirCacheIterator(repo.readDirCache()), FileTreeIterator(repo))
+            git.diff()
+                .setCached(staged)
+                .apply {
+                    if (path != null) setPathFilter(org.eclipse.jgit.treewalk.filter.PathFilter.create(path))
+                    if (nameOnly) setShowNameOnly(true)
+                    if (nameStatus) setShowNameAndStatusOnly(true)
                 }
-            }
+                .setOutputStream(out)
+                .call()
             out.toString(Charsets.UTF_8).take(20_000).ifEmpty { "(no changes)" }
         }
     }
@@ -177,6 +183,8 @@ class GitCommitTool : Tool {
             "message" to strSchema("The commit message"),
             "author" to strSchema("Author name (optional)"),
             "email" to strSchema("Author email (optional)"),
+            "amend" to boolSchema("true to amend the previous commit instead of creating a new one (default false)"),
+            "allowEmpty" to boolSchema("true to allow a commit with no changes (default false)"),
         ),
         required = listOf("message"),
     )
@@ -184,8 +192,16 @@ class GitCommitTool : Tool {
         val message = args.str("message") ?: return ToolResult("git_commit: missing 'message'", isError = true)
         val author = args.str("author")?.takeIf { it.isNotBlank() } ?: "PhoneCode"
         val email = args.str("email")?.takeIf { it.isNotBlank() } ?: "agent@phonecode.dev"
+        val amend = args.bool("amend") == true
+        val allowEmpty = args.bool("allowEmpty") == true
         return withRepo(context, name) { git ->
-            val commit = git.commit().setMessage(message).setAuthor(author, email).setNoVerify(true).call()
+            val commit = git.commit()
+                .setMessage(message)
+                .setAuthor(author, email)
+                .setNoVerify(true)
+                .setAmend(amend)
+                .setAllowEmpty(allowEmpty)
+                .call()
             "committed ${commit.name.take(8)}: ${commit.shortMessage}"
         }
     }
@@ -193,13 +209,29 @@ class GitCommitTool : Tool {
 
 class GitLogTool : Tool {
     override val name = "git_log"
-    override val description = "Show recent commits (hash, author, message)."
+    override val description = "Show recent commits (hash, author, message). Can filter by path, include all refs, and skip commits for paging."
     override val promptSnippet = "show recent git commits"
-    override val parameters = objectSchema(mapOf("count" to intSchema("How many commits (default 15)")), emptyList())
+    override val parameters = objectSchema(
+        mapOf(
+            "count" to intSchema("How many commits (default 15)"),
+            "path" to strSchema("Only show commits touching this file or directory path (optional)"),
+            "all" to boolSchema("true to include commits from all refs, not just HEAD (default false)"),
+            "skip" to intSchema("How many commits to skip, for paging (default 0)"),
+        ),
+        emptyList(),
+    )
     override suspend fun execute(args: JsonObject, context: ToolContext): ToolResult {
         val count = args.int("count")?.coerceIn(1, 100) ?: 15
+        val path = args.str("path")?.takeIf { it.isNotBlank() }
+        val all = args.bool("all") == true
+        val skip = (args.int("skip") ?: 0).coerceIn(0, 1000)
         return withRepo(context, name) { git ->
-            git.log().setMaxCount(count).call().joinToString("\n") { c ->
+            git.log().apply {
+                setMaxCount(count)
+                if (path != null) addPath(path)
+                if (all) all()
+                if (skip > 0) setSkip(skip)
+            }.call().joinToString("\n") { c ->
                 "${c.name.take(8)}  ${c.authorIdent.name}  ${c.shortMessage}"
             }.ifEmpty { "(no commits yet)" }
         }
@@ -208,21 +240,42 @@ class GitLogTool : Tool {
 
 class GitBranchTool : Tool {
     override val name = "git_branch"
-    override val description = "List branches, or create a new branch with name=<branch>."
-    override fun mutates(args: JsonObject): Boolean = !args.str("name").isNullOrBlank()
-    override val promptSnippet = "list or create git branches"
-    override val parameters = objectSchema(mapOf("name" to strSchema("New branch name to create (omit to just list)")), emptyList())
+    override val description = "List branches (remote=true includes remote-tracking branches), create with name=<branch>, or delete with delete=<branch>."
+    override fun mutates(args: JsonObject): Boolean =
+        !args.str("name").isNullOrBlank() || !args.str("delete").isNullOrBlank()
+    override val promptSnippet = "list, create, or delete git branches"
+    override val parameters = objectSchema(
+        mapOf(
+            "name" to strSchema("New branch name to create (omit to just list)"),
+            "delete" to strSchema("Branch name to delete (omit unless deleting)"),
+            "force" to boolSchema("true to force-delete a branch that is not fully merged (default false)"),
+            "remote" to boolSchema("true to include remote-tracking branches in the list (default false)"),
+        ),
+        emptyList(),
+    )
     override suspend fun execute(args: JsonObject, context: ToolContext): ToolResult {
         val create = args.str("name")?.takeIf { it.isNotBlank() }
+        val delete = args.str("delete")?.takeIf { it.isNotBlank() }
+        val force = args.bool("force") == true
+        val remote = args.bool("remote") == true
         return withRepo(context, name) { git ->
-            if (create != null) {
-                git.branchCreate().setName(create).call()
-                "created branch $create"
-            } else {
-                val current = git.repository.branch
-                git.branchList().call().joinToString("\n") { ref ->
-                    val short = ref.name.removePrefix("refs/heads/")
-                    if (short == current) "* $short" else "  $short"
+            when {
+                create != null -> {
+                    git.branchCreate().setName(create).call()
+                    "created branch $create"
+                }
+                delete != null -> {
+                    git.branchDelete().setBranchNames(delete).setForce(force).call()
+                    "deleted branch $delete"
+                }
+                else -> {
+                    val current = git.repository.branch
+                    git.branchList().apply {
+                        if (remote) setListMode(org.eclipse.jgit.api.ListBranchCommand.ListMode.ALL)
+                    }.call().joinToString("\n") { ref ->
+                        val short = ref.name.removePrefix("refs/heads/").removePrefix("refs/remotes/")
+                        if (short == current) "* $short" else "  $short"
+                    }
                 }
             }
         }
@@ -231,58 +284,90 @@ class GitBranchTool : Tool {
 
 class GitCheckoutTool : Tool {
     override val name = "git_checkout"
-    override val description = "Switch to an existing branch (or create+switch with create=true)."
+    override val description = "Switch to an existing branch (or create+switch with create=true), restore working-tree files from the index with path=<file>, or force-switch discarding local changes with force=true."
     override val mutating = true
     override val promptSnippet = "switch git branches (checkout)"
     override val parameters = objectSchema(
-        mapOf("name" to strSchema("Branch to switch to"), "create" to boolSchema("true to create the branch first")),
-        required = listOf("name"),
+        mapOf(
+            "name" to strSchema("Branch to switch to (omit to restore files instead)"),
+            "create" to boolSchema("true to create the branch first"),
+            "path" to strSchema("Restore this file or directory from the index (git checkout -- <path>); takes precedence over branch switching"),
+            "force" to boolSchema("true to discard local changes when switching (default false)"),
+        ),
+        emptyList(),
     )
     override suspend fun execute(args: JsonObject, context: ToolContext): ToolResult {
-        val branch = args.str("name") ?: return ToolResult("git_checkout: missing 'name'", isError = true)
+        val branch = args.str("name")?.takeIf { it.isNotBlank() }
         val create = args.bool("create") == true
+        val path = args.str("path")?.takeIf { it.isNotBlank() }
+        val force = args.bool("force") == true
         return withRepo(context, name) { git ->
-            git.checkout().setName(branch).setCreateBranch(create).call()
-            "switched to $branch"
+            if (path != null) {
+                git.checkout().addPath(path).call()
+                "restored: $path"
+            } else {
+                val target = branch ?: return@withRepo "git_checkout: missing 'name' or 'path'"
+                git.checkout().setName(target).setCreateBranch(create).setForced(force).call()
+                "switched to $target"
+            }
         }
     }
 }
 
 class GitPushTool(private val credentials: suspend () -> Pair<String, String>?) : Tool {
     override val name = "git_push"
-    override val description = "Push the current branch to the remote (origin) over HTTPS, using the configured git credentials."
+    override val description = "Push the current branch to the remote (origin) over HTTPS, using the configured git credentials. " +
+        "Can force-push, push tags, or dry-run."
     override val mutating = true
     override val promptSnippet = "push commits to the remote"
-    override val parameters = NO_PARAMS
+    override val parameters = objectSchema(
+        mapOf(
+            "force" to boolSchema("true to force-push, overwriting remote history (default false)"),
+            "tags" to boolSchema("true to also push tags (default false)"),
+            "dryRun" to boolSchema("true to simulate the push without sending anything (default false)"),
+        ),
+        emptyList(),
+    )
     override suspend fun execute(args: JsonObject, context: ToolContext): ToolResult {
         val creds = credentials() ?: return ToolResult("git_push: no git credentials set (add a username + token in Settings)", isError = true)
+        val force = args.bool("force") == true
+        val tags = args.bool("tags") == true
+        val dryRun = args.bool("dryRun") == true
         return withRepo(context, name) { git ->
             require(requireHttpsOrigin(git, push = true).all(URIish::isGitHub)) { "origin must use GitHub HTTPS" }
             requireSslVerification(git)
             val failures = git.push().setRemote("origin")
-                .setCredentialsProvider(UsernamePasswordCredentialsProvider(creds.first, creds.second)).call()
+                .setCredentialsProvider(UsernamePasswordCredentialsProvider(creds.first, creds.second))
+                .setForce(force)
+                .setDryRun(dryRun)
+                .apply { if (tags) setPushTags() }
+                .call()
                 .flatMap { it.remoteUpdates }
                 .filterNot { successfulPushStatus(it.status) }
             require(failures.isEmpty()) {
                 "push rejected: ${failures.joinToString { "${it.remoteName} ${it.status}" }}"
             }
-            "pushed to origin"
+            if (dryRun) "dry-run: push would succeed" else "pushed to origin"
         }
     }
 }
 
 class GitPullTool(private val credentials: suspend () -> Pair<String, String>?) : Tool {
     override val name = "git_pull"
-    override val description = "Pull from the remote (origin) over HTTPS, using the configured git credentials."
+    override val description = "Pull from the remote (origin) over HTTPS, using the configured git credentials. Pass rebase=true for a rebase pull."
     override val mutating = true
     override val promptSnippet = "pull from the remote"
-    override val parameters = NO_PARAMS
+    override val parameters = objectSchema(
+        mapOf("rebase" to boolSchema("true to rebase local commits onto the remote instead of merging (default false)")),
+        emptyList(),
+    )
     override suspend fun execute(args: JsonObject, context: ToolContext): ToolResult {
         val creds = credentials()
+        val rebase = args.bool("rebase") == true
         return withRepo(context, name) { git ->
             val origins = requireHttpsOrigin(git)
             requireSslVerification(git)
-            val pull = git.pull().setRemote("origin")
+            val pull = git.pull().setRemote("origin").setRebase(rebase)
             if (creds != null && origins.all(URIish::isGitHub)) {
                 pull.setCredentialsProvider(UsernamePasswordCredentialsProvider(creds.first, creds.second))
             }
